@@ -1,0 +1,59 @@
+{
+  "expo": {
+    "name": "Nova",
+    "slug": "nova-android",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "dark",
+    "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#000000"
+    },
+    "android": {
+      "package": "com.nova.assistant",
+      "permissions": [
+        "android.permission.RECORD_AUDIO",
+        "android.permission.INTERNET",
+        "android.permission.ACCESS_NETWORK_STATE",
+        "android.permission.CAMERA",
+        "android.permission.MODIFY_AUDIO_SETTINGS",
+        "android.permission.WRITE_EXTERNAL_STORAGE",
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.FLASHLIGHT",
+        "android.permission.BLUETOOTH",
+        "android.permission.ACCESS_FINE_LOCATION"
+      ]
+    },
+    "ios": {
+      "supportsTablet": true,
+      "infoPlist": {
+        "NSMicrophoneUsageDescription": "Nova needs microphone access for voice commands",
+        "NSSpeechRecognitionUsageDescription": "Nova needs speech recognition to process your voice",
+        "NSCameraUsageDescription": "Nova needs camera access for flashlight control",
+        "NSBluetoothAlwaysUsageDescription": "Nova needs Bluetooth access for device control"
+      }
+    },
+    "plugins": [
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Allow Nova to access your camera for flashlight control."
+        }
+      ],
+      [
+        "expo-speech",
+        {
+          "speechRecognitionPermission": "Allow Nova to recognize speech"
+        }
+      ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "your-eas-project-id"
+      }
+    },
+    "owner": "nova"
+  }
+}
