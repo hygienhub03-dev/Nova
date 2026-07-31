@@ -1,0 +1,19 @@
+buildscript {
+    ext.kotlin_version = "1.9.22"
+    repositories {
+        google()
+        mavenCentral()
+    }
+    dependencies {
+        classpath("com.android.tools.build:gradle:8.2.0")
+        classpath("com.chaquo.python:gradle:17.0.0")
+    }
+}
+
+allprojects {
+    repositories {
+        google()
+        mavenCentral()
+        maven { url "$rootDir/../node_modules/expo-camera/android/maven" }
+    }
+}

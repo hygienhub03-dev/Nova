@@ -4,12 +4,14 @@ import { LinearGradient } from 'expo-linear-gradient';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Speech from 'expo-speech';
 import * as Haptics from 'expo-haptics';
+import { colors, spacing, borderRadius, typography } from '../theme/design-tokens';
 
 export default function SettingsScreen({ navigation }: { navigation: any }) {
   const [ttsEnabled, setTtsEnabled] = useState(true);
   const [apiKey, setApiKey] = useState('');
   const [model, setModel] = useState('openai/gpt-4o-mini');
   const [localModelEnabled, setLocalModelEnabled] = useState(false);
+  const [tailscaleEnabled, setTailscaleEnabled] = useState(false);
 
   useEffect(() => {
     loadSettings();
@@ -22,11 +24,13 @@ export default function SettingsScreen({ navigation }: { navigation: any }) {
         'openrouter_key',
         'model',
         'local_model_enabled',
+        'tailscale_enabled',
       ]);
       if (saved[0][1] !== null) setTtsEnabled(saved[0][1] === 'true');
       if (saved[1][1] !== null) setApiKey(saved[1][1]);
       if (saved[2][1] !== null) setModel(saved[2][1]);
       if (saved[3][1] !== null) setLocalModelEnabled(saved[3][1] === 'true');
+      if (saved[4][1] !== null) setTailscaleEnabled(saved[4][1] === 'true');
     } catch {}
   };
 
@@ -131,6 +135,22 @@ export default function SettingsScreen({ navigation }: { navigation: any }) {
         </View>
 
         <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Remote Control (PC)</Text>
+          <View style={styles.row}>
+            <Text style={styles.label}>Tailscale Remote Control</Text>
+            <Switch value={tailscaleEnabled} onValueChange={(val) => { setTailscaleEnabled(val); saveSetting('tailscale_enabled', val); }} />
+          </View>
+          <Text style={styles.hint}>
+            {tailscaleEnabled
+              ? 'Remote control enabled. Use QR code or peer discovery to connect to your PC.'
+              : 'Remote control disabled. Toggle on to connect to your PC.'}
+          </Text>
+          <TouchableOpacity style={[styles.saveBtn, { marginTop: 10 }]} onPress={() => navigation.navigate('RemoteControl')}>
+            <Text style={styles.saveBtnText}>Open Remote Control →</Text>
+          </TouchableOpacity>
+        </View>
+
+        <View style={styles.section}>
           <Text style={[styles.sectionTitle, { color: '#ef4444' }]}>Danger Zone</Text>
           <TouchableOpacity style={styles.dangerBtn} onPress={clearCache}>
             <Text style={styles.dangerBtnText}>Clear All Cache</Text>
@@ -143,22 +163,22 @@ export default function SettingsScreen({ navigation }: { navigation: any }) {
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  content: { padding: 20, paddingBottom: 60 },
-  title: { color: '#fff', fontSize: 28, fontWeight: 'bold', marginBottom: 4 },
-  subtitle: { color: '#888', fontSize: 14, marginBottom: 24 },
-  row: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.08)' },
-  label: { color: '#ccc', fontSize: 15 },
-  input: { backgroundColor: 'rgba(255,255,255,0.08)', color: '#fff', borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, fontSize: 15, marginBottom: 10, borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)' },
-  saveBtn: { backgroundColor: 'rgba(59, 130, 246, 0.3)', paddingVertical: 10, paddingHorizontal: 20, borderRadius: 10, alignSelf: 'flex-start' },
-  saveBtnText: { color: '#60a5fa', fontWeight: '600', fontSize: 14 },
-  section: { marginTop: 20, padding: 16, backgroundColor: 'rgba(255,255,255,0.05)', borderRadius: 16 },
-  sectionTitle: { color: '#fff', fontSize: 16, fontWeight: '600', marginBottom: 10 },
-  modelBtn: { padding: 12, borderRadius: 10, backgroundColor: 'rgba(255,255,255,0.05)', marginBottom: 8 },
-  modelBtnActive: { backgroundColor: 'rgba(59, 130, 246, 0.2)', borderWidth: 1, borderColor: 'rgba(59, 130, 246, 0.5)' },
-  modelBtnText: { color: '#ccc', fontSize: 14 },
-  hint: { color: '#666', fontSize: 12, marginTop: 8, lineHeight: 18 },
-  testBtn: { backgroundColor: 'rgba(255,255,255,0.08)', padding: 12, borderRadius: 10, alignItems: 'center', marginTop: 8 },
-  testBtnText: { color: '#ccc', fontWeight: '500', fontSize: 14 },
-  dangerBtn: { backgroundColor: 'rgba(239, 68, 68, 0.15)', padding: 14, borderRadius: 12, alignItems: 'center', borderWidth: 1, borderColor: 'rgba(239, 68, 68, 0.3)' },
-  dangerBtnText: { color: '#ef4444', fontWeight: '600', fontSize: 14 },
+  content: { padding: spacing.lg, paddingBottom: 60 },
+  title: { color: colors.textPrimary, fontSize: typography.fontSize.xxxl, fontWeight: typography.fontWeight.bold, marginBottom: spacing.xs },
+  subtitle: { color: colors.textTertiary, fontSize: typography.fontSize.md, marginBottom: spacing.xxl },
+  section: { marginTop: spacing.xxl, padding: spacing.lg, backgroundColor: colors.glass, borderRadius: borderRadius.lg },
+  sectionTitle: { color: colors.textPrimary, fontSize: typography.fontSize.lg, fontWeight: typography.fontWeight.semibold, marginBottom: spacing.md },
+  row: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: spacing.md, borderBottomWidth: 1, borderBottomColor: colors.borderLight },
+  label: { color: colors.textSecondary, fontSize: typography.fontSize.lg },
+  input: { backgroundColor: colors.glass, color: colors.textPrimary, borderRadius: borderRadius.md, paddingHorizontal: spacing.lg, paddingVertical: spacing.md, fontSize: typography.fontSize.lg, marginBottom: spacing.md, borderWidth: 1, borderColor: colors.border },
+  saveBtn: { backgroundColor: colors.primary, paddingVertical: spacing.md, paddingHorizontal: spacing.xxl, borderRadius: borderRadius.md, alignSelf: 'flex-start', marginTop: spacing.sm },
+  saveBtnText: { color: colors.textPrimary, fontWeight: typography.fontWeight.semibold, fontSize: typography.fontSize.md },
+  modelBtn: { padding: spacing.md, borderRadius: borderRadius.md, backgroundColor: colors.glass, marginBottom: spacing.sm },
+  modelBtnActive: { backgroundColor: 'rgba(59, 130, 246, 0.2)', borderWidth: 1, borderColor: colors.primary },
+  modelBtnText: { color: colors.textSecondary, fontSize: typography.fontSize.md },
+  hint: { color: colors.textMuted, fontSize: typography.fontSize.sm, marginTop: spacing.sm, lineHeight: 18 },
+  testBtn: { backgroundColor: 'rgba(255,255,255,0.08)', padding: spacing.md, borderRadius: borderRadius.md, alignItems: 'center', marginTop: spacing.sm },
+  testBtnText: { color: colors.textSecondary, fontWeight: typography.fontWeight.medium, fontSize: typography.fontSize.md },
+  dangerBtn: { backgroundColor: 'rgba(239, 68, 68, 0.15)', padding: spacing.lg, borderRadius: borderRadius.lg, alignItems: 'center', borderWidth: 1, borderColor: 'rgba(239, 68, 68, 0.3)' },
+  dangerBtnText: { color: colors.danger, fontWeight: typography.fontWeight.semibold, fontSize: typography.fontSize.md },
 });

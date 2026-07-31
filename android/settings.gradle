@@ -1,0 +1,27 @@
+pluginManagement {
+    repositories {
+        google()
+        mavenCentral()
+        gradlePluginPortal()
+    }
+}
+
+dependencyResolutionManagement {
+    repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+    repositories {
+        google()
+        mavenCentral()
+        maven { url "$rootDir/../node_modules/expo-camera/android/maven" }
+    }
+}
+
+rootProject.name = "nova-android"
+include(":app")
+include(":expo-modules-core")
+project(":expo-modules-core").projectDir = new File(rootDir, "../node_modules/expo-modules-core/android")
+include(":expo-av")
+project(":expo-av").projectDir = new File(rootDir, "../node_modules/expo-av/android")
+include(":expo-camera")
+project(":expo-camera").projectDir = new File(rootDir, "../node_modules/expo-camera/android")
+include(":expo-sqlite")
+project(":expo-sqlite").projectDir = new File(rootDir, "../node_modules/expo-sqlite/android")

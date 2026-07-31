@@ -16,6 +16,58 @@ db.execSync(`
     answer TEXT,
     keywords TEXT
   );
+
+  CREATE TABLE IF NOT EXISTS smart_devices (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    device_id TEXT UNIQUE,
+    name TEXT,
+    type TEXT,
+    brand TEXT,
+    ip_address TEXT,
+    zone TEXT,
+    status TEXT,
+    capabilities TEXT,
+    config TEXT,
+    last_seen INTEGER
+  );
+
+  CREATE TABLE IF NOT EXISTS habits (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT,
+    description TEXT,
+    trigger_type TEXT,
+    trigger_value TEXT,
+    action_type TEXT,
+    action_params TEXT,
+    confidence REAL DEFAULT 0.5,
+    times_triggered INTEGER DEFAULT 0,
+    times_successful INTEGER DEFAULT 0,
+    last_triggered INTEGER,
+    is_active INTEGER DEFAULT 1,
+    created_at INTEGER
+  );
+
+  CREATE TABLE IF NOT EXISTS routine_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    habit_id INTEGER,
+    trigger TEXT,
+    action TEXT,
+    status TEXT,
+    executed_at INTEGER
+  );
+
+  CREATE TABLE IF NOT EXISTS proactive_suggestions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    type TEXT,
+    title TEXT,
+    description TEXT,
+    action_type TEXT,
+    action_params TEXT,
+    confidence REAL DEFAULT 0.5,
+    shown INTEGER DEFAULT 0,
+    dismissed INTEGER DEFAULT 0,
+    created_at INTEGER
+  );
 `);
 
 export class MemoryEngine {

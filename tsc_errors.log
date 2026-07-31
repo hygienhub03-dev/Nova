@@ -1,0 +1,60 @@
+src/components/Orb.tsx(3,45): error TS2307: Cannot find module 'expo-orb' or its corresponding type declarations.
+src/components/QrCodeGenerator.tsx(3,20): error TS2307: Cannot find module 'react-native-svg-uri' or its corresponding type declarations.
+src/components/QrCodeGenerator.tsx(5,28): error TS2307: Cannot find module 'expo-clipboard' or its corresponding type declarations.
+src/components/QrCodeGenerator.tsx(45,14): error TS2604: JSX element type 'QrCode' does not have any construct or call signatures.
+src/components/QrCodeGenerator.tsx(45,14): error TS2786: 'QrCode' cannot be used as a JSX component.
+  Its type 'typeof import("C:/Users/stoneboy/Downloads/Nova/nova-android/node_modules/react-native-qrcode-svg/index")' is not a valid JSX element type.
+src/screens/GlobalExecutionScreen.tsx(45,25): error TS2552: Cannot find name 'Alert'. Did you mean 'alert'?
+src/screens/GlobalExecutionScreen.tsx(87,8): error TS2769: No overload matches this call.
+  Overload 1 of 2, '(props: FlatListProps<never>): FlatList<never>', gave the following error.
+    Property 'renderItem' is missing in type '{ data: never[]; ListHeaderComponent: Element; ListEmptyComponent: null; }' but required in type 'Readonly<FlatListProps<never>>'.
+  Overload 2 of 2, '(props: FlatListProps<never>, context: any): FlatList<never>', gave the following error.
+    Property 'renderItem' is missing in type '{ data: never[]; ListHeaderComponent: Element; ListEmptyComponent: null; }' but required in type 'Readonly<FlatListProps<never>>'.
+src/screens/HomeScreen.tsx(6,19): error TS2307: Cannot find module '@react-native-voice/voice' or its corresponding type declarations.
+src/screens/HomeScreen.tsx(11,32): error TS2307: Cannot find module 'expo-orb' or its corresponding type declarations.
+src/screens/HomeScreen.tsx(12,8): error TS2613: Module '"C:/Users/stoneboy/Downloads/Nova/nova-android/src/services/AssistantEngine"' has no default export. Did you mean to use 'import { AssistantEngine } from "C:/Users/stoneboy/Downloads/Nova/nova-android/src/services/AssistantEngine"' instead?
+src/screens/HomeScreen.tsx(13,8): error TS2613: Module '"C:/Users/stoneboy/Downloads/Nova/nova-android/src/services/DeviceController"' has no default export. Did you mean to use 'import { DeviceController } from "C:/Users/stoneboy/Downloads/Nova/nova-android/src/services/DeviceController"' instead?
+src/screens/HomeScreen.tsx(20,10): error TS2305: Module '"@react-navigation/native"' has no exported member 'useNavigation'.
+src/screens/HomeScreen.tsx(68,30): error TS7006: Parameter 'e' implicitly has an 'any' type.
+src/screens/HomeScreen.tsx(82,28): error TS7006: Parameter 'e' implicitly has an 'any' type.
+src/screens/HomeScreen.tsx(129,11): error TS2304: Cannot find name 'ttsEnabled'.
+src/screens/HomeScreen.tsx(142,13): error TS2304: Cannot find name 'ttsEnabled'.
+src/screens/ShazamScreen.tsx(7,23): error TS7016: Could not find a declaration file for module 'expo-av'. 'C:/Users/stoneboy/Downloads/Nova/nova-android/node_modules/expo-av/build/index.js' implicitly has an 'any' type.
+  Try `npm i --save-dev @types/expo-av` if it exists or add a new declaration (.d.ts) file containing `declare module 'expo-av';`
+src/screens/ShazamScreen.tsx(8,10): error TS2305: Module '"@react-navigation/native"' has no exported member 'useNavigation'.
+src/services/AssistantEngine.ts(160,21): error TS2345: Argument of type '{ action?: string | undefined; params?: any; }' is not assignable to parameter of type '{ action?: string | undefined; params?: any; text: string; } | PromiseLike<{ action?: string | undefined; params?: any; text: string; }>'.
+  Property 'text' is missing in type '{ action?: string | undefined; params?: any; }' but required in type '{ action?: string | undefined; params?: any; text: string; }'.
+src/services/AssistantEngine.ts(177,19): error TS2345: Argument of type '{ action?: string | undefined; params?: any; }' is not assignable to parameter of type '{ action?: string | undefined; params?: any; text: string; } | PromiseLike<{ action?: string | undefined; params?: any; text: string; }>'.
+src/services/AssistantEngine.ts(243,43): error TS2307: Cannot find module '@openai/agents' or its corresponding type declarations.
+src/services/ComposioService.ts(1,26): error TS2307: Cannot find module '@composio/core' or its corresponding type declarations.
+src/services/ComposioService.ts(2,38): error TS2307: Cannot find module '@composio/openai-agents' or its corresponding type declarations.
+src/services/ComposioService.ts(50,34): error TS2307: Cannot find module '@openai/agents' or its corresponding type declarations.
+src/services/DeviceController.ts(4,31): error TS2307: Cannot find module 'react-native-volume-manager' or its corresponding type declarations.
+src/services/GeminiLiveService.ts(1,23): error TS7016: Could not find a declaration file for module 'ws'. 'C:/Users/stoneboy/Downloads/Nova/nova-android/node_modules/ws/index.js' implicitly has an 'any' type.
+  Try `npm i --save-dev @types/ws` if it exists or add a new declaration (.d.ts) file containing `declare module 'ws';`
+src/services/HabitEngine.ts(4,19): error TS2551: Property 'openDatabaseSync' does not exist on type 'typeof import("C:/Users/stoneboy/Downloads/Nova/nova-android/node_modules/expo-sqlite/build/index")'. Did you mean 'openDatabase'?
+src/services/MemoryEngine.ts(3,19): error TS2551: Property 'openDatabaseSync' does not exist on type 'typeof import("C:/Users/stoneboy/Downloads/Nova/nova-android/node_modules/expo-sqlite/build/index")'. Did you mean 'openDatabase'?
+src/services/PrivacySecurityService.ts(2,25): error TS2307: Cannot find module 'expo-crypto' or its corresponding type declarations.
+src/services/SmartHomeDeviceManager.ts(5,19): error TS2551: Property 'openDatabaseSync' does not exist on type 'typeof import("C:/Users/stoneboy/Downloads/Nova/nova-android/node_modules/expo-sqlite/build/index")'. Did you mean 'openDatabase'?
+src/services/SmartHomeDeviceManager.ts(98,7): error TS2322: Type '{ device_id: any; name: any; type: any; brand: any; model: any; ip_address: any; zone: any; status: any; capabilities: any; config: any; last_seen: any; }' is not assignable to type 'SmartDevice'.
+  Object literal may only specify known properties, and 'last_seen' does not exist in type 'SmartDevice'.
+src/services/TailscaleService.ts(36,7): error TS2322: Type 'boolean | undefined' is not assignable to type 'boolean'.
+  Type 'undefined' is not assignable to type 'boolean'.
+src/services/TailscaleService.ts(45,17): error TS2339: Property 'dns' does not exist on type 'NetworkState'.
+src/services/TailscaleService.ts(45,30): error TS2339: Property 'dns' does not exist on type 'NetworkState'.
+src/services/TailscaleService.ts(46,36): error TS2339: Property 'dns' does not exist on type 'NetworkState'.
+src/services/TailscaleService.ts(48,29): error TS2339: Property 'ipAddress' does not exist on type 'NetworkState'.
+src/services/TailscaleService.ts(71,21): error TS2339: Property 'generateMockPeers' does not exist on type 'Window & typeof globalThis'.
+src/services/TailscaleService.ts(87,12): error TS2339: Property 'peers' does not exist on type 'Window & typeof globalThis'.
+src/services/TailscaleService.ts(90,19): error TS2339: Property 'generateMockPeers' does not exist on type 'Window & typeof globalThis'.
+src/services/TailscaleService.ts(111,10): error TS2339: Property 'currentPeer' does not exist on type 'Window & typeof globalThis'.
+src/services/TailscaleService.ts(112,10): error TS2551: Property 'wsUrl' does not exist on type 'Window & typeof globalThis'. Did you mean 'URL'?
+src/services/TailscaleService.ts(113,10): error TS2339: Property 'connected' does not exist on type 'Window & typeof globalThis'.
+src/services/TailscaleService.ts(131,12): error TS2339: Property 'connected' does not exist on type 'Window & typeof globalThis'.
+src/services/TailscaleService.ts(137,10): error TS2339: Property 'connected' does not exist on type 'Window & typeof globalThis'.
+src/services/TailscaleService.ts(138,10): error TS2339: Property 'currentPeer' does not exist on type 'Window & typeof globalThis'.
+src/services/TailscaleService.ts(139,10): error TS2551: Property 'wsUrl' does not exist on type 'Window & typeof globalThis'. Did you mean 'URL'?
+src/services/TailscaleService.ts(160,14): error TS2339: Property 'currentPeer' does not exist on type 'Window & typeof globalThis'.
+src/services/TailscaleService.ts(160,39): error TS2339: Property 'currentPeer' does not exist on type 'Window & typeof globalThis'.
+src/services/TailscaleService.ts(185,31): error TS2339: Property 'getConnectedPeer' does not exist on type 'Window & typeof globalThis'.
+src/services/TailscaleService.ts(186,26): error TS2339: Property 'connected' does not exist on type 'Window & typeof globalThis'.

@@ -26,31 +26,50 @@ export default function MessageBubble({ item, index }: MessageBubbleProps) {
           {item.content}
         </Markdown>
       )}
+      <Text style={styles.timestamp}>{new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</Text>
     </Animated.View>
   );
 }
 
 const styles = StyleSheet.create({
   bubble: {
-    maxWidth: '85%',
-    padding: 14,
-    borderRadius: 18,
-    marginBottom: 12,
+    maxWidth: '82%',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 16,
+    marginBottom: 8,
   },
   userBubble: {
     alignSelf: 'flex-end',
-    backgroundColor: 'rgba(59, 130, 246, 0.3)',
+    backgroundColor: '#3b82f6',
     borderBottomRightRadius: 4,
+    shadowColor: '#3b82f6',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 4,
   },
   aiBubble: {
     alignSelf: 'flex-start',
-    backgroundColor: 'rgba(255,255,255,0.1)',
+    backgroundColor: 'rgba(255,255,255,0.12)',
     borderBottomLeftRadius: 4,
   },
   userText: {
-    color: '#fff',
-    fontSize: 16,
+    color: '#ffffff',
+    fontSize: 15,
     lineHeight: 22,
+    fontWeight: '400',
+  },
+  aiText: {
+    color: '#e0e0e0',
+    fontSize: 15,
+    lineHeight: 22,
+  },
+  timestamp: {
+    fontSize: 10,
+    color: 'rgba(255,255,255,0.3)',
+    marginTop: 4,
+    alignSelf: 'flex-end',
   },
   markdownBody: {
     color: '#e0e0e0',
@@ -58,25 +77,32 @@ const styles = StyleSheet.create({
     lineHeight: 22,
   },
   markdownHeading1: {
-    color: '#fff',
+    color: '#ffffff',
     fontSize: 20,
     fontWeight: 'bold',
+    marginBottom: 8,
+    marginTop: 4,
   },
   markdownHeading2: {
-    color: '#fff',
-    fontSize: 18,
+    color: '#ffffff',
+    fontSize: 17,
     fontWeight: 'bold',
+    marginBottom: 6,
+    marginTop: 4,
   },
   markdownListItem: {
     color: '#e0e0e0',
     fontSize: 15,
+    marginBottom: 4,
   },
   markdownCodeBlock: {
-    backgroundColor: 'rgba(0,0,0,0.3)',
-    padding: 10,
-    borderRadius: 8,
+    backgroundColor: 'rgba(0,0,0,0.4)',
+    padding: 12,
+    borderRadius: 10,
     color: '#e0e0e0',
     fontFamily: 'monospace',
+    fontSize: 13,
+    marginVertical: 8,
   },
 });
 

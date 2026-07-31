@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
-  View, Text, TextInput, TouchableOpacity, FlatList, KeyboardAvoidingView, Platform, StyleSheet, InteractionManager, StatusBar
+  View, Text, TextInput, TouchableOpacity, FlatList, KeyboardAvoidingView, Platform, StyleSheet, InteractionManager, StatusBar, ScrollView
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import Voice from '@react-native-voice/voice';
@@ -9,11 +9,15 @@ import * as Haptics from 'expo-haptics';
 import Markdown from 'react-native-markdown-display';
 import Animated, { FadeInUp, FadeInDown } from 'react-native-reanimated';
 import { setOrbActivity } from 'expo-orb';
-import { AssistantEngine } from '../services/AssistantEngine';
-import { DeviceController } from '../services/DeviceController';
+import AssistantEngine from '../services/AssistantEngine';
+import DeviceController from '../services/DeviceController';
+import { HabitEngine } from '../services/HabitEngine';
 import MessageBubble from '../components/MessageBubble';
 import Orb from '../components/Orb';
 import VoiceButton from '../components/VoiceButton';
+import SmartHomeWidget from '../components/home/SmartHomeWidget';
+
+import { useNavigation } from '@react-navigation/native';
 
 export default function HomeScreen({ navigation }: { navigation: any }) {
   const [messages, setMessages] = useState<any[]>([]);
@@ -21,7 +25,7 @@ export default function HomeScreen({ navigation }: { navigation: any }) {
   const [isListening, setIsListening] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [isOffline, setIsOffline] = useState(false);
-  const [ttsEnabled, setTtsEnabled] = useState(true);
+  const [proactiveSuggestions, setProactiveSuggestions] = useState<any[]>([]);
   const flatListRef = useRef<FlatList>(null);
 
   useEffect(() => {
@@ -37,6 +41,23 @@ export default function HomeScreen({ navigation }: { navigation: any }) {
     const offline = await AssistantEngine.isOffline();
     setIsOffline(offline);
   };
+
+  const loadProactiveSuggestions = async () => {
+    const suggestions = await AssistantEngine.checkProactiveContext({
+      timeOfDay: `${new Date().getHours()}:${new Date().getMinutes()}`,
+    });
+    setProactiveSuggestions(suggestions);
+  };
+
+  useEffect(() => {
+    setupVoice();
+    checkNetwork();
+    loadProactiveSuggestions();
+    return () => {
+      Voice.destroy();
+      Speech.stop();
+    };
+  }, []);
 
   const setupVoice = () => {
     Voice.onSpeechStart = () => {
@@ -138,6 +159,34 @@ export default function HomeScreen({ navigation }: { navigation: any }) {
       <StatusBar hidden />
       <LinearGradient colors={['#000', '#0a1628', '#1e3a5f']} style={styles.gradient}>
 
+        {/* Header Navigation */}
+        <View style={styles.topBar}>
+          <TouchableOpacity style={styles.topBarBtn} onPress={() => navigation.navigate('Memory')}>
+            <Text style={styles.topBarBtnText}>🧠</Text>
+          </TouchableOpacity>
+          <Text style={styles.topBarTitle}>Nova</Text>
+          <View style={styles.topBarRight}>
+            <TouchableOpacity style={styles.topBarBtn} onPress={() => navigation.navigate('SmartHome')}>
+              <Text style={styles.topBarBtnText}>🏠</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.topBarBtn} onPress={() => navigation.navigate('Habits')}>
+              <Text style={styles.topBarBtnText}>⚡</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.topBarBtn} onPress={() => navigation.navigate('GlobalExecution')}>
+              <Text style={styles.topBarBtnText}>🌐</Text>
+            </TouchableOpacity>
+                            <TouchableOpacity style={styles.topBarBtn} onPress={() => navigation.navigate('RemoteControl')}>
+                                <Text style={styles.topBarBtnText}>📡</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity style={styles.topBarBtn} onPress={() => navigation.navigate('Shazam')}>
+                                <Text style={styles.topBarBtnText}>🎵</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity style={styles.topBarBtn} onPress={() => navigation.navigate('Settings')}>
+                                <Text style={styles.topBarBtnText}>⚙️</Text>
+                            </TouchableOpacity>
+          </View>
+        </View>
+
         {isOffline && (
           <View style={styles.offlineBanner}>
             <Text style={styles.offlineText}>Offline Mode (Using Local Cache)</Text>
@@ -150,6 +199,33 @@ export default function HomeScreen({ navigation }: { navigation: any }) {
 
         <Text style={styles.greeting}>Hello</Text>
         <Text style={styles.mainText}>How can I help you today?</Text>
+
+        {/* Smart Home Quick Widget */}
+        <SmartHomeWidget />
+
+        {/* Proactive Suggestions */}
+        {proactiveSuggestions.length > 0 && (
+          <FlatList
+            data={proactiveSuggestions}
+            keyExtractor={(item) => item.id || item.habitId}
+            renderItem={({ item }) => (
+              <TouchableOpacity
+                style={styles.proactiveCard}
+                onPress={async () => {
+                  if (item.action_type && item.action_params) {
+                    await DeviceController.executeAction(item.action_type, item.action_params);
+                  }
+                }}
+              >
+                <Text style={styles.proactiveTitle}>{item.title || item.habitName}</Text>
+                <Text style={styles.proactiveDesc}>{item.description || 'Tap to execute'}</Text>
+              </TouchableOpacity>
+            )}
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.proactiveContainer}
+          />
+        )}
 
         <FlatList
           ref={flatListRef}
@@ -190,12 +266,21 @@ export default function HomeScreen({ navigation }: { navigation: any }) {
 const styles = StyleSheet.create({
   container: { flex: 1 },
   gradient: { flex: 1, alignItems: 'center' },
+  topBar: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 16, paddingTop: 48, paddingBottom: 8, width: '100%' },
+  topBarTitle: { color: '#fff', fontSize: 18, fontWeight: '600' },
+  topBarRight: { flexDirection: 'row', gap: 8 },
+  topBarBtn: { padding: 8, width: 40, height: 40, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(255,255,255,0.08)', borderRadius: 20 },
+  topBarBtnText: { fontSize: 18 },
   offlineBanner: { position: 'absolute', top: 0, left: 0, right: 0, backgroundColor: '#ef4444', paddingVertical: 8, paddingHorizontal: 12, zIndex: 10, alignItems: 'center' },
   offlineText: { color: '#fff', fontSize: 12, fontWeight: 'bold' },
-  orbContainer: { marginTop: 30, alignItems: 'center', justifyContent: 'center', height: 150 },
+  orbContainer: { marginTop: 10, alignItems: 'center', justifyContent: 'center', height: 150 },
   greeting: { color: '#888', fontSize: 16, marginTop: 10 },
   mainText: { color: '#fff', fontSize: 26, fontWeight: '600', textAlign: 'center', marginTop: 8, paddingHorizontal: 30 },
-  chatContainer: { padding: 16, paddingBottom: 100, width: '100%' },
+   chatContainer: { padding: 16, paddingBottom: 100, width: '100%' },
+  proactiveContainer: { paddingLeft: 16, paddingVertical: 8, marginBottom: 8 },
+  proactiveCard: { backgroundColor: 'rgba(59, 130, 246, 0.15)', padding: 12, borderRadius: 12, marginRight: 10, width: 200, borderWidth: 1, borderColor: 'rgba(59, 130, 246, 0.3)' },
+  proactiveTitle: { color: '#fff', fontSize: 13, fontWeight: '600' },
+  proactiveDesc: { color: '#aaa', fontSize: 11, marginTop: 4 },
   inputArea: { position: 'absolute', bottom: 0, width: '100%', paddingHorizontal: 16, paddingBottom: 30, paddingTop: 10 },
   inputWrapper: { flexDirection: 'row', backgroundColor: 'rgba(255,255,255,0.1)', borderRadius: 30, paddingHorizontal: 16, alignItems: 'center', borderWidth: 1, borderColor: 'rgba(255,255,255,0.15)', minHeight: 50 },
   input: { flex: 1, color: '#fff', maxHeight: 100, paddingVertical: 12, fontSize: 16 },

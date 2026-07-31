@@ -1,0 +1,106 @@
+apply plugin: "com.android.application"
+apply plugin: "com.chaquo.python"
+apply from: file("../../node_modules/react-native-vector-icons/fonts.gradle")
+
+import com.android.build.OutputFile
+
+def projectRoot = rootDir.getAbsoluteFile().getParentFile().getAbsoluteFile()
+
+def safeExtGet(ext, fallback) {
+    rootProject.ext.has(ext) ? rootProject.ext.get(ext) : fallback
+}
+
+def enableProguardInReleaseBuilds = safeExtGet("enableProguardInReleaseBuilds", false)
+def jscFlavor = "org.webkit:javascriptcore:+"
+def enableHermes = safeExtGet("enableHermes", true)
+
+android {
+    ndkVersion safeExtGet("ndkVersion", "25.1.8937393")
+    compileSdkVersion safeExtGet("compileSdkVersion", 34)
+
+    defaultConfig {
+        applicationId "com.nova.assistant"
+        minSdkVersion safeExtGet("minSdkVersion", 24)
+        targetSdkVersion safeExtGet("targetSdkVersion", 34)
+        versionCode 1
+        versionName "1.0.0"
+    }
+
+    splits {
+        abi {
+            reset()
+            enable true
+            universalApk false
+            include "armeabi-v7a", "x86", "x86_64", "arm64-v8a"
+        }
+    }
+
+    signingConfigs {
+        debug {
+            storeFile file("debug.keystore")
+            storePassword "android"
+            keyAlias "androiddebugkey"
+            keyPassword "android"
+        }
+    }
+
+    buildTypes {
+        debug {
+            signingConfig signingConfigs.debug
+        }
+        release {
+            signingConfig signingConfigs.debug
+            minifyEnabled enableProguardInReleaseBuilds
+            proguardFiles getDefaultProguardFile("proguard-android.txt"), "proguard-rules.pro"
+        }
+    }
+
+    packagingOptions {
+        pickFirst "**/armeabi-v7a/libjsc.so"
+        pickFirst "**/arm64-v8a/libjsc.so"
+        pickFirst "**/x86/libjsc.so"
+        pickFirst "**/x86_64/libjsc.so"
+        pickFirst "**/armeabi-v7a/libc++_shared.so"
+        pickFirst "**/arm64-v8a/libc++_shared.so"
+        pickFirst "**/x86/libc++_shared.so"
+        pickFirst "**/x86_64/libc++_shared.so"
+        pickFirst "**/ReactAndroid/**/*.so"
+    }
+}
+
+chaquopy {
+    version "3.9"
+    pip {
+        install "shazamio"
+        install "aiohttp"
+        install "numpy"
+    }
+}
+
+configurations.all {
+    resolutionStrategy {
+        force "com.facebook.react:react-android:0.73.0"
+        force "com.facebook.react:hermes-android:0.73.0"
+    }
+}
+
+dependencies {
+    implementation(project(":expo-modules-core"))
+    implementation(project(":expo-av"))
+    implementation(project(":expo-camera"))
+    implementation(project(":expo-sqlite"))
+    implementation("com.facebook.react:react-android")
+    implementation("com.facebook.react:hermes-android")
+    implementation("androidx.swiperefreshlayout:swiperefreshlayout:1.1.0")
+    implementation("com.facebook.fresco:fresco:3.1.3")
+    implementation("com.facebook.fresco:imagepipeline-okhttp3:3.1.3")
+    debugImplementation("com.facebook.flipper:flipper:0.201.0")
+    debugImplementation("com.facebook.flipper:flipper-network-plugin:0.201.0")
+    debugImplementation("com.facebook.flipper:flipper-so-loader:0.201.0")
+}
+
+tasks.whenTaskAdded { task ->
+    if (task.name.startsWith("bundle") && task.name.contains("JsAndAssets")) {
+        task.enabled = false
+    }
+}

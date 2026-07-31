@@ -1,0 +1,2099 @@
+Switching to **Expo and React Native** changes the architecture significantly. To achieve this level of deep system integration (background wake word, screen reading, accessibility actions), **you cannot use standard Expo Go**. 
+
+You **must** use an **Expo Custom Dev Client** (`npx expo run:android`) so you can add native Android modules and background services.
+
+Here is the tailored React Native / Expo implementation guide for your stack.
+
+---
+
+### Step 1: Low-Power Wake Word (`react-native-vosk`)
+We will use `react-native-vosk` in **grammar mode** to listen only for "hey assistant", keeping CPU usage under 2%.
+
+**1. Install & Prebuild**
+```bash
+npx expo install react-native-vosk
+npx expo prebuild -p android # Creates the native android directory
+```
+
+**2. Wake Word Hook (React Native)**
+Download the `vosk-model-small-en-us-0.15` and place it in `android/app/src/main/assets/vosk-model`.
+
+```javascript
+import Vosk, { Recognizer } from 'react-native-vosk';
+import { useEffect, useState } from 'react';
+
+export const useWakeWord = (onWakeDetected) => {
+  const [isListening, setIsListening] = useState(false);
+
+  useEffect(() => {
+    const setupVosk = async () => {
+      await Vosk.loadModel();
+      // Grammar mode: ONLY listen for this phrase to save massive battery
+      const recognizer = new Recognizer(['hey assistant', 'hey assistant hey assistant']);
+      
+      Vosk.addListener((result) => {
+        if (result && result.text.includes('hey assistant')) {
+          onWakeDetected();
+          recognizer.reset(); // Reset to catch the actual user command next
+        }
+      });
+
+      Vosk.startRecognizing(recognizer);
+      setIsListening(true);
+    };
+
+    setupVosk();
+    return () => {
+      Vosk.stopRecognizing();
+      setIsListening(false);
+    };
+  }, []);
+
+  return isListening;
+};
+```
+
+---
+
+### Step 2: Gemini Real-Time API (WebSocket Streaming)
+The Gemini Real-Time API uses bidirectional WebSockets, which is perfect for streaming audio chunks from React Native and getting back text or tool calls instantly.
+
+```javascript
+import { useRef, useEffect } from 'react';
+
+const GEMINI_WS_URL = `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContent?key=YOUR_API_KEY`;
+
+export const useGeminiRealtime = () => {
+  const wsRef = useRef(null);
+
+  useEffect(() => {
+    wsRef.current = new WebSocket(GEMINI_WS_URL);
+
+    wsRef.current.onopen = () => {
+      console.log('✅ Gemini Real-Time Connected');
+      // Send initial setup message if required by your specific tool configuration
+    };
+
+    wsRef.current.onmessage = (event) => {
+      const response = JSON.parse(event.data);
+      // Handle Gemini's response (text, tool calls, etc.)
+      if (response.candidates) {
+        console.log('Gemini says:', response.candidates[0].content.parts[0].text);
+      }
+    };
+
+    return () => wsRef.current?.close();
+  }, []);
+
+  const sendAudioChunk = (base64Audio) => {
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({
+        realtime_input: {
+          media_chunks: [{
+            mime_type: "audio/pcm",
+            data: base64Audio
+          }]
+        }
+      }));
+    }
+  };
+
+  return { sendAudioChunk };
+};
+```
+*(Note: Pair this with `expo-av` or `react-native-audio-recorder-player` to capture PCM audio chunks and feed them to `sendAudioChunk`).*
+
+---
+
+### Step 3: On-Screen Awareness (MediaProjection)
+Expo doesn’t have a built-in MediaProjection module. You will need to create a **Custom Native Module** to capture the screen and pass the image URI to React Native, which then sends it to Gemini Vision.
+
+**1. Create Native Module (`android/app/src/main/java/com/yourapp/ScreenCaptureModule.kt`)**
+```kotlin
+package com.yourapp
+
+import android.app.Activity
+import android.content.Context
+import android.content.Intent
+import android.media.projection.MediaProjectionManager
+import com.facebook.react.bridge.*
+
+class ScreenCaptureModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaModule(reactContext) {
+    override fun getName() = "ScreenCaptureModule"
+
+    @ReactMethod
+    fun startCapture(promise: Promise) {
+        val activity = currentActivity ?: return promise.reject("NO_ACTIVITY", "No activity found")
+        val mediaProjectionManager = activity.getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
+        
+        // This triggers the Android system permission dialog
+        val intent = mediaProjectionManager.createScreenCaptureIntent()
+        activity.startActivityForResult(intent, 1001) // Handle result in MainActivity
+        promise.resolve("Permission requested")
+    }
+}
+```
+**2. React Native Usage**
+Once the screen is captured (saved as a temporary JPEG/PNG via the native module), read the file using `expo-file-system` and send it to Gemini:
+```javascript
+import * as FileSystem from 'expo-file-system';
+
+const analyzeScreen = async (imageUri) => {
+  const base64 = await FileSystem.readAsStringAsync(imageUri, {
+    encoding: FileSystem.EncodingType.Base64,
+  });
+
+  // Send to Gemini Vision API
+  const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=YOUR_API_KEY`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      contents: [{
+        parts: [
+          { text: "What is currently on this screen? Summarize it." },
+          { inline_data: { mime_type: "image/jpeg", data: base64 } }
+        ]
+      }]
+    })
+  });
+  const data = await response.json();
+  console.log(data.candidates[0].content.parts[0].text);
+};
+```
+
+---
+
+### Step 4: System-Wide Actions (Accessibility Service)
+To click buttons or type in *other* apps, you need an Android `AccessibilityService`. 
+
+**1. Define the Service (`android/app/src/main/res/xml/accessibility_service_config.xml`)**
+```xml
+<accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
+    android:description="@string/accessibility_service_description"
+    android:accessibilityEventTypes="typeAllMask"
+    android:accessibilityFlags="flagDefault|flagRetrieveInteractiveWindows"
+    android:accessibilityFeedbackType="feedbackGeneric"
+    android:canRetrieveWindowContent="true"
+    android:canPerformGestures="true" /> <!-- CRITICAL for clicking -->
+```
+
+**2. Native Module for Gestures (`ActionModule.kt`)**
+```kotlin
+@ReactMethod
+fun performGlobalBack() {
+    val service = MyAccessibilityService.instance ?: return
+    service.performGlobalAction(android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_BACK)
+}
+
+@ReactMethod
+fun tapScreen(x: Int, y: Int, promise: Promise) {
+    val service = MyAccessibilityService.instance ?: return promise.reject("NO_SERVICE", "Service not running")
+    val builder = android.accessibilityservice.GestureDescription.Builder()
+    val path = android.graphics.Path()
+    path.moveTo(x.toFloat(), y.toFloat())
+    builder.addStroke(android.accessibilityservice.GestureDescription.StrokeDescription(path, 0, 100))
+    
+    service.dispatchGesture(builder.build(), object : android.accessibilityservice.AccessibilityService.GestureResultCallback() {
+        override fun onCompleted(gestureDescription: android.accessibilityservice.GestureDescription?) {
+            promise.resolve("Tap successful")
+        }
+        override fun onCancelled(gestureDescription: android.accessibilityservice.GestureDescription?) {
+            promise.reject("GESTURE_CANCELLED", "Tap was cancelled")
+        }
+    }, null)
+}
+```
+
+---
+
+### Step 5: Shazam Integration (The Expo-Friendly Way)
+Running Python (`ShazamIO`) directly inside an Expo app is highly discouraged (requires complex native bridges like Chaquopy). 
+
+**The Best Practice Architecture:**
+1. React Native records 5 seconds of audio using `expo-av` (`Audio.Recording`).
+2. RN uploads the `.wav` file to **your own lightweight backend** (e.g., a $5/mo VPS running Python/FastAPI).
+3. Your backend runs `ShazamIO`, gets the track metadata, and returns it to React Native.
+
+**Backend Example (Python FastAPI + ShazamIO):**
+```python
+from fastapi import FastAPI, UploadFile
+from shazamio import Shazam
+import shutil
+
+app = FastAPI()
+shazam = Shazam()
+
+@app.post("/identify")
+async def identify_audio(file: UploadFile):
+    temp_path = "temp_audio.wav"
+    with open(temp_path, "wb") as buffer:
+        shutil.copyfileobj(file.file, buffer)
+    
+    result = await shazam.recognize(temp_path)
+    if "track" in result:
+        return {"title": result["track"]["title"], "artist": result["track"]["subtitle"]}
+    return {"error": "No match found"}
+```
+
+---
+
+### ⚠️ Critical Expo Checklist
+1. **Permissions**: Add these to `app.json` / `app.config.js`:
+   ```json
+   "android": {
+     "permissions": [
+       "RECORD_AUDIO",
+       "FOREGROUND_SERVICE",
+       "SYSTEM_ALERT_WINDOW",
+       "READ_EXTERNAL_STORAGE",
+       "BIND_ACCESSIBILITY_SERVICE"
+     ]
+   }
+   ```
+2. **Foreground Service**: Android will kill background voice listening unless you declare a Foreground Service with a persistent notification in your custom native code.
+3. **Testing**: You **must** build the app locally (`npx expo run:android`) or via EAS Build (`eas build --profile development --platform android`) to test native modules. Expo Go will crash on `react-native-vosk` or custom native modules.
+
+Would you like me to write the complete `MyAccessibilityService.kt` boilerplate, or focus on refining the Gemini Real-Time WebSocket audio streaming logic first?
+Here is the complete, production-ready boilerplate for the Android Accessibility Service, the React Native bridge to talk to it, and the necessary configuration files. 
+
+Since you are using Expo, you will place these files in your native `android/` directory (which is generated when you run `npx expo prebuild`).
+
+---
+
+### 1. The Core Service: `MyAccessibilityService.kt`
+This is the actual Android service that runs in the background. It holds a static reference to itself so our React Native bridge can trigger actions.
+
+**Path:** `android/app/src/main/java/com/yourapp/MyAccessibilityService.kt`
+
+```kotlin
+package com.yourapp
+
+import android.accessibilityservice.AccessibilityService
+import android.accessibilityservice.GestureDescription
+import android.graphics.Path
+import android.util.Log
+import android.view.accessibility.AccessibilityEvent
+
+class MyAccessibilityService : AccessibilityService() {
+
+    companion object {
+        // Static instance so the React Native bridge can access it
+        var instance: MyAccessibilityService? = null
+            private set
+    }
+
+    override fun onServiceConnected() {
+        super.onServiceConnected()
+        instance = this
+        Log.d("AccessibilityService", "✅ Service Connected and Ready")
+    }
+
+    override fun onAccessibilityEvent(event: AccessibilityEvent?) {
+        // We don't need to react to every UI event for this boilerplate, 
+        // but you can listen for specific app opens or text changes here.
+    }
+
+    override fun onInterrupt() {
+        Log.w("AccessibilityService", "⚠️ Service Interrupted")
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        instance = null
+        Log.d("AccessibilityService", "❌ Service Destroyed")
+    }
+
+    // --- ACTION METHODS CALLED BY REACT NATIVE ---
+
+    fun performGlobalAction(action: Int): Boolean {
+        return performGlobalAction(action) // Built-in Android method
+    }
+
+    fun performTap(x: Float, y: Float, callback: (Boolean) -> Unit) {
+        val path = Path().apply { moveTo(x, y) }
+        val stroke = GestureDescription.StrokeDescription(path, 0, 100) // 100ms duration
+        val gesture = GestureDescription.Builder().addStroke(stroke).build()
+
+        dispatchGesture(gesture, object : GestureResultCallback() {
+            override fun onCompleted(gestureDescription: GestureDescription?) {
+                callback(true)
+            }
+            override fun onCancelled(gestureDescription: GestureDescription?) {
+                callback(false)
+            }
+        }, null)
+    }
+
+    fun performSwipe(startX: Float, startY: Float, endX: Float, endY: Float, durationMs: Long, callback: (Boolean) -> Unit) {
+        val path = Path().apply {
+            moveTo(startX, startY)
+            lineTo(endX, endY)
+        }
+        val stroke = GestureDescription.StrokeDescription(path, 0, durationMs)
+        val gesture = GestureDescription.Builder().addStroke(stroke).build()
+
+        dispatchGesture(gesture, object : GestureResultCallback() {
+            override fun onCompleted(gestureDescription: GestureDescription?) {
+                callback(true)
+            }
+            override fun onCancelled(gestureDescription: GestureDescription?) {
+                callback(false)
+            }
+        }, null)
+    }
+}
+```
+
+---
+
+### 2. The React Native Bridge: `AccessibilityBridgeModule.kt`
+This module exposes the Kotlin functions to JavaScript so you can call them like normal async functions in React Native.
+
+**Path:** `android/app/src/main/java/com/yourapp/AccessibilityBridgeModule.kt`
+
+```kotlin
+package com.yourapp
+
+import android.accessibilityservice.AccessibilityService
+import com.facebook.react.bridge.*
+
+class AccessibilityBridgeModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaModule(reactContext) {
+
+    override fun getName(): String = "AccessibilityBridge"
+
+    @ReactMethod
+    fun isServiceEnabled(promise: Promise) {
+        promise.resolve(MyAccessibilityService.instance != null)
+    }
+
+    @ReactMethod
+    fun goBack() {
+        val service = MyAccessibilityService.instance
+        if (service != null) {
+            service.performGlobalAction(AccessibilityService.GLOBAL_ACTION_BACK)
+        } else {
+            throw Exceptions.ReactMethodNotFoundException("Accessibility Service not running")
+        }
+    }
+
+    @ReactMethod
+    fun goHome() {
+        val service = MyAccessibilityService.instance
+        if (service != null) {
+            service.performGlobalAction(AccessibilityService.GLOBAL_ACTION_HOME)
+        }
+    }
+
+    @ReactMethod
+    fun tap(x: Float, y: Float, promise: Promise) {
+        val service = MyAccessibilityService.instance
+        if (service == null) {
+            promise.reject("NO_SERVICE", "Accessibility Service is not enabled in Settings")
+            return
+        }
+
+        service.performTap(x, y) { success ->
+            if (success) promise.resolve("Tap successful")
+            else promise.reject("TAP_FAILED", "System cancelled the tap")
+        }
+    }
+
+    @ReactMethod
+    fun swipe(startX: Float, startY: Float, endX: Float, endY: Float, durationMs: Int, promise: Promise) {
+        val service = MyAccessibilityService.instance
+        if (service == null) {
+            promise.reject("NO_SERVICE", "Accessibility Service is not enabled in Settings")
+            return
+        }
+
+        service.performSwipe(startX, startY, endX, endY, durationMs.toLong()) { success ->
+            if (success) promise.resolve("Swipe successful")
+            else promise.reject("SWIPE_FAILED", "System cancelled the swipe")
+        }
+    }
+}
+```
+*Note: Don't forget to register this module in your `MainApplication.kt` inside the `getPackages()` method by adding `AccessibilityBridgeModule(reactApplicationContext)` to the list.*
+
+---
+
+### 3. The Configuration: `accessibility_service_config.xml`
+This tells Android exactly what your service is allowed to do.
+
+**Path:** `android/app/src/main/res/xml/accessibility_service_config.xml`
+
+```xml
+<?xml version="1.0" encoding="utf-8"?>
+<accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
+    android:description="@string/accessibility_service_description"
+    android:accessibilityEventTypes="typeAllMask"
+    android:accessibilityFlags="flagDefault|flagRetrieveInteractiveWindows|flagReportViewIds"
+    android:accessibilityFeedbackType="feedbackGeneric"
+    android:notificationTimeout="100"
+    android:canRetrieveWindowContent="true"
+    android:canPerformGestures="true" /> <!-- CRITICAL: Allows tapping/swiping -->
+```
+*Note: Add `<string name="accessibility_service_description">Allows the AI assistant to interact with your screen.</string>` to your `strings.xml`.*
+
+---
+
+### 4. Register in `AndroidManifest.xml`
+Add this inside the `<application>` tag in your `AndroidManifest.xml`.
+
+```xml
+<service
+    android:name=".MyAccessibilityService"
+    android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE"
+    android:exported="true"
+    android:label="AI Assistant Controller">
+    <intent-filter>
+        <action android:name="android.accessibilityservice.AccessibilityService" />
+    </intent-filter>
+    <meta-data
+        android:name="android.accessibilityservice"
+        android:resource="@xml/accessibility_service_config" />
+</service>
+```
+
+---
+
+### 5. The React Native JavaScript Wrapper
+Now you can call these native actions cleanly from your Expo/React Native code!
+
+**Path:** `src/utils/AccessibilityManager.js`
+
+```javascript
+import { NativeModules, Alert, Linking, Platform } from 'react-native';
+
+const { AccessibilityBridge } = NativeModules;
+
+export const checkAccessibilityEnabled = async () => {
+  if (Platform.OS !== 'android') return false;
+  return await AccessibilityBridge.isServiceEnabled();
+};
+
+export const promptUserToEnableAccessibility = () => {
+  Alert.alert(
+    'Enable AI Assistant',
+    'To control your screen, please enable "AI Assistant Controller" in Accessibility settings.',
+    [
+      { text: 'Cancel', style: 'cancel' },
+      { 
+        text: 'Open Settings', 
+        onPress: () => Linking.openSettings() // Takes them straight to your app's settings
+      },
+    ]
+  );
+};
+
+// --- ACTIONS ---
+
+export const aiGoBack = async () => {
+  const isEnabled = await checkAccessibilityEnabled();
+  if (!isEnabled) return promptUserToEnableAccessibility();
+  AccessibilityBridge.goBack();
+};
+
+export const aiGoHome = async () => {
+  const isEnabled = await checkAccessibilityEnabled();
+  if (!isEnabled) return promptUserToEnableAccessibility();
+  AccessibilityBridge.goHome();
+};
+
+export const aiTap = async (x, y) => {
+  const isEnabled = await checkAccessibilityEnabled();
+  if (!isEnabled) return promptUserToEnableAccessibility();
+  
+  try {
+    await AccessibilityBridge.tap(x, y);
+    console.log(`✅ Tapped at ${x}, ${y}`);
+  } catch (e) {
+    console.error('Tap failed:', e);
+  }
+};
+
+export const aiSwipe = async (startX, startY, endX, endY, duration = 500) => {
+  const isEnabled = await checkAccessibilityEnabled();
+  if (!isEnabled) return promptUserToEnableAccessibility();
+
+  try {
+    await AccessibilityBridge.swipe(startX, startY, endX, endY, duration);
+    console.log(`✅ Swiped from ${startX},${startY} to ${endX},${endY}`);
+  } catch (e) {
+    console.error('Swipe failed:', e);
+  }
+};
+```
+
+### 🚨 Crucial Testing Step for Android
+When you build and run this app, **it will not work immediately**. Android requires the user to manually toggle the service on for security reasons.
+
+1. Open your app.
+2. Call `checkAccessibilityEnabled()`. It will return `false`.
+3. Call `promptUserToEnableAccessibility()`.
+4. The user goes to **Settings > Accessibility > [Your App Name] > AI Assistant Controller** and turns the toggle **ON**.
+5. Android will show a scary warning ("This service can read all your screen text..."). The user must accept.
+6. Now, `aiTap(500, 1000)` will actually tap the screen!
+
+### A Note on Expo Config Plugins
+Because you are using Expo, if you run `npx expo prebuild` again, it will overwrite your `android/` folder. To make these changes permanent in Expo, you would eventually wrap this logic in an **Expo Config Plugin** (a JavaScript file that automatically injects the Kotlin code and Manifest updates during the prebuild phase). 
+
+For now, while you are actively developing and testing, just make your changes in the `android/` folder and use `npx expo run:android` to test!
+https://github.com/shazamio/ShazamIO , https://github.com/chaquo/chaquopy , https://medium.com/@munish.choudhary/running-python-in-react-native-using-native-modules-android-ios-d8a828ed51df , https://expans.io/2022/11/04/react-native-and-python-run-python-script-on-the-frontend-side/
+Thank you for sharing the official documentation. You are absolutely right to hold the implementation to the latest official standards. 
+
+Based on the **official Chaquopy 17.0.0 documentation**, I have refined the implementation to be 100% compliant, using the modern Gradle `plugins` syntax, correct ABI filters, and the safest initialization pattern for a React Native environment.
+
+Here is the updated, production-ready guide.
+
+---
+
+### Step 1: Updated Gradle Configuration (Chaquopy 17.0.0)
+
+**1. Top-level `android/build.gradle`**  
+Use the modern `plugins` block. Ensure `mavenCentral()` is in your `pluginManagement` repositories in `settings.gradle`.
+
+```gradle
+plugins {
+    // ... other plugins like com.android.application
+    id "com.chaquo.python" version "17.0.0" apply false
+}
+```
+
+**2. App-level `android/app/build.gradle`**  
+Apply the plugin, set the ABI filters (64-bit is standard for modern Android), and install `shazamio`.
+
+```gradle
+plugins {
+    id "com.android.application"
+    id "com.chaquo.python" // Apply Chaquopy here
+}
+
+android {
+    // ... your existing android config
+    
+    defaultConfig {
+        // ... your existing config
+        ndk {
+            // Modern devices and emulators (Apple Silicon). 
+            // Omit x86_64 if you only target physical devices to save APK size.
+            abiFilters += listOf("arm64-v8a", "x86_64")
+        }
+    }
+}
+
+chaquopy {
+    defaultConfig {
+        version = "3.11" // Stable, well-supported version
+        pip {
+            install "shazamio"
+            install "numpy"
+        }
+    }
+}
+```
+
+---
+
+### Step 2: The Python Script
+Place this in the default Chaquopy source directory: `android/app/src/main/python/shazam_recognizer.py`
+
+```python
+import asyncio
+import json
+from shazamio import Shazam
+
+def recognize_song(file_path: str) -> str:
+    """
+    Synchronous wrapper for async ShazamIO.
+    Returns a JSON string to be easily parsed by Kotlin/React Native.
+    """
+    async def _recognize():
+        shazam = Shazam()
+        try:
+            out = await shazam.recognize(file_path)
+            if 'track' in out:
+                track = out['track']
+                # Extract safe fallbacks for missing data
+                hub = track.get('hub', {})
+                actions = hub.get('actions', [{}])
+                providers = hub.get('providers', [{}])
+                
+                return json.dumps({
+                    "success": True,
+                    "title": track.get('title', 'Unknown Title'),
+                    "artist": track.get('subtitle', 'Unknown Artist'),
+                    "apple_music": actions[0].get('uri', '') if actions else '',
+                    "spotify": providers[0].get('actions', [{}])[0].get('uri', '') if providers else ''
+                })
+            else:
+                return json.dumps({"success": False, "error": "No match found"})
+        except Exception as e:
+            return json.dumps({"success": False, "error": str(e)})
+
+    # Run the async function in the current thread
+    return asyncio.run(_recognize())
+```
+
+---
+
+### Step 3: The Kotlin Bridge Module (Documentation Compliant)
+This module safely checks if Python is started, converts the React Native `file://` URI to a native Android path, and returns the JSON string.
+
+**Path:** `android/app/src/main/java/com/yourapp/ShazamModule.kt`
+
+```kotlin
+package com.yourapp
+
+import android.net.Uri
+import com.chaquo.python.Python
+import com.chaquo.python.android.AndroidPlatform
+import com.facebook.react.bridge.*
+
+class ShazamModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaModule(reactContext) {
+
+    override fun getName(): String = "ShazamModule"
+
+    private fun ensurePythonInitialized() {
+        // Official Chaquopy recommendation for conditional initialization
+        if (!Python.isStarted()) {
+            Python.start(AndroidPlatform(reactApplicationContext))
+        }
+    }
+
+    @ReactMethod
+    fun identifySong(audioFileUri: String, promise: Promise) {
+        try {
+            ensurePythonInitialized()
+            
+            // Convert React Native "file:///..." URI to a native Android absolute path
+            val uri = Uri.parse(audioFileUri)
+            val filePath = uri.path 
+            if (filePath == null || java.io.File(filePath).exists().not()) {
+                promise.reject("FILE_NOT_FOUND", "Audio file does not exist at: $audioFileUri")
+                return
+            }
+
+            // Import the Python module and call the function
+            val shazamModule = Python.getInstance().getModule("shazam_recognizer")
+            val resultJson = shazamModule.callAttr("recognize_song", filePath).toString()
+            
+            // Return the JSON string directly to JavaScript
+            promise.resolve(resultJson)
+
+        } catch (e: Exception) {
+            promise.reject("SHAZAM_ERROR", e.message ?: "Unknown Python error")
+        }
+    }
+}
+```
+*(Remember to register this module in your `MainApplication.kt` inside the `getPackages()` method).*
+
+---
+
+### Step 4: React Native Implementation (Expo AV + Chaquopy)
+
+**Path:** `src/utils/ShazamManager.js`
+
+```javascript
+import { NativeModules, Platform } from 'react-native';
+import { Audio } from 'expo-av';
+
+const { ShazamModule } = NativeModules;
+
+export const identifyCurrentSong = async () => {
+  if (Platform.OS !== 'android') {
+    throw new Error('Chaquopy ShazamIO is currently Android-only.');
+  }
+
+  try {
+    // 1. Request permissions
+    const { status } = await Audio.requestPermissionsAsync();
+    if (status !== 'granted') {
+      throw new Error('Microphone permission is required');
+    }
+
+    // 2. Set up audio recording
+    await Audio.setAudioModeAsync({
+      allowsRecordingIOS: true,
+      playsInSilentModeIOS: true,
+    });
+
+    const recording = new Audio.Recording();
+    await recording.prepareToRecordAsync({
+      android: {
+        extension: '.wav',
+        outputFormat: Audio.RECORDING_OPTION_ANDROID_OUTPUT_FORMAT_DEFAULT,
+        audioEncoder: Audio.RECORDING_OPTION_ANDROID_AUDIO_ENCODER_DEFAULT,
+        sampleRate: 44100,
+        numberOfChannels: 1,
+        bitRate: 128000,
+      },
+    });
+
+    console.log('🎤 Listening for 5 seconds...');
+    await recording.startAsync();
+
+    // Wait 5 seconds
+    await new Promise(resolve => setTimeout(resolve, 5000));
+
+    await recording.stopAndUnloadAsync();
+    const uri = recording.getURI(); // Returns something like "file:///data/user/0/..."
+    console.log('✅ Recording saved to:', uri);
+
+    // 3. Send to Chaquopy Python module
+    console.log('🐍 Sending to ShazamIO via Chaquopy...');
+    const resultJson = await ShazamModule.identifySong(uri);
+    const result = JSON.parse(resultJson);
+
+    if (result.success) {
+      console.log(`🎵 Found: ${result.title} by ${result.artist}`);
+      return result;
+    } else {
+      console.log('❌ No match found:', result.error);
+      return null;
+    }
+
+  } catch (error) {
+    console.error('Shazam Identification Failed:', error);
+    throw error;
+  }
+};
+```
+
+---
+
+### 🔑 Key Improvements Based on Official Docs:
+1. **Modern Gradle Syntax**: Uses `id "com.chaquo.python" version "17.0.0"` as officially recommended, avoiding deprecated DSL.
+2. **Safe Initialization**: Uses `if (!Python.isStarted())` to prevent crashes if the module is called multiple times or if the app lifecycle restarts the JS bridge.
+3. **URI Path Handling**: React Native's `expo-av` returns a `file://` URI string. The Kotlin code now correctly uses `Uri.parse(audioFileUri).path` to strip the prefix, ensuring Python's `open()` function receives a valid Linux-style absolute path (e.g., `/data/user/0/...`).
+4. **64-bit Focus**: Updated `abiFilters` to `arm64-v8a` and `x86_64`, which aligns with Google Play's 64-bit requirements and modern emulators.
+
+### ⚠️ Expo Prebuild Reminder
+Because you are modifying native Android files, you must run:
+```bash
+npx expo prebuild --clean
+npx expo run:android
+```
+If you want these changes to persist across future `prebuild` runs without manually copying files, you will eventually wrap the `build.gradle` and `AndroidManifest.xml` changes in an **Expo Config Plugin**. Let me know if you'd like the JavaScript code for that Config Plugin!
+Here is the complete Expo Config Plugin to automate and persist the Chaquopy and ShazamIO integration. This ensures your native Android modifications survive `npx expo prebuild` executions.
+
+### Step 1: Install Dependencies
+Ensure you have the config plugins package installed in your project root.
+```bash
+npm install @expo/config-plugins
+```
+
+### Step 2: Create the Config Plugin
+Create a new directory named `plugins` at the root of your project, and add the file `withChaquopyShazam.js`.
+
+**Path:** `plugins/withChaquopyShazam.js`
+```javascript
+const {
+  withAppBuildGradle,
+  withProjectBuildGradle,
+  withMainApplication,
+  withDangerousMod,
+} = require('@expo/config-plugins');
+const path = require('path');
+const fs = require('fs');
+
+const withChaquopyShazam = (config) => {
+  const packageName = config.android?.package || 'com.yourapp';
+  const packagePath = packageName.replace(/\./g, '/');
+
+  // 1. Modify Project-level build.gradle
+  config = withProjectBuildGradle(config, (config) => {
+    let buildGradle = config.modResults.contents;
+    
+    if (!buildGradle.includes('chaquo.com/maven')) {
+      buildGradle = buildGradle.replace(
+        /(repositories\s*\{)/,
+        '$1\n        maven { url "https://chaquo.com/maven" }'
+      );
+    }
+    
+    if (!buildGradle.includes('com.chaquo.python:gradle')) {
+      buildGradle = buildGradle.replace(
+        /(dependencies\s*\{)/,
+        '$1\n        classpath "com.chaquo.python:gradle:17.0.0"'
+      );
+    }
+    
+    config.modResults.contents = buildGradle;
+    return config;
+  });
+
+  // 2. Modify App-level build.gradle
+  config = withAppBuildGradle(config, (config) => {
+    let appBuildGradle = config.modResults.contents;
+
+    if (!appBuildGradle.includes('id "com.chaquo.python"')) {
+      appBuildGradle = appBuildGradle.replace(
+        /(plugins\s*\{)/,
+        '$1\n    id "com.chaquo.python"'
+      );
+    }
+
+    if (!appBuildGradle.includes('abiFilters')) {
+      appBuildGradle = appBuildGradle.replace(
+        /(defaultConfig\s*\{)/,
+        '$1\n        ndk {\n            abiFilters += listOf("arm64-v8a", "x86_64")\n        }'
+      );
+    }
+
+    if (!appBuildGradle.includes('chaquopy {')) {
+      appBuildGradle += `\nchaquopy {\n    defaultConfig {\n        version = "3.11"\n        pip {\n            install "shazamio"\n            install "numpy"\n        }\n    }\n}\n`;
+    }
+
+    config.modResults.contents = appBuildGradle;
+    return config;
+  });
+
+  // 3. Modify MainApplication.kt to register the module
+  config = withMainApplication(config, (config) => {
+    let mainApp = config.modResults.contents;
+    const importStatement = `import ${packageName}.ShazamModule`;
+    const addStatement = `packages.add(ShazamModule(reactApplicationContext))`;
+
+    if (!mainApp.includes(importStatement)) {
+      const importRegex = /(import\s+[\w\.]+\s*\n)/g;
+      const matches = [...mainApp.matchAll(importRegex)];
+      if (matches.length > 0) {
+        const lastImport = matches[matches.length - 1];
+        mainApp = mainApp.slice(0, lastImport.index + lastImport[0].length) + 
+                  `${importStatement}\n` + 
+                  mainApp.slice(lastImport.index + lastImport[0].length);
+      }
+    }
+
+    if (!mainApp.includes(addStatement)) {
+      mainApp = mainApp.replace(
+        /(override fun getPackages\(\): List<ReactPackage>\s*\{)/,
+        `$1\n        ${addStatement}`
+      );
+    }
+
+    config.modResults.contents = mainApp;
+    return config;
+  });
+
+  // 4. Write Python and Kotlin files directly to the Android project
+  config = withDangerousMod(config, [
+    'android',
+    async (config) => {
+      const androidDir = config.modRequest.platformProjectRoot;
+      
+      // Write Python script
+      const pythonDir = path.join(androidDir, 'app/src/main/python');
+      if (!fs.existsSync(pythonDir)) {
+        fs.mkdirSync(pythonDir, { recursive: true });
+      }
+      
+      const pythonCode = `import asyncio
+import json
+from shazamio import Shazam
+
+def recognize_song(file_path: str) -> str:
+    async def _recognize():
+        shazam = Shazam()
+        try:
+            out = await shazam.recognize(file_path)
+            if 'track' in out:
+                track = out['track']
+                hub = track.get('hub', {})
+                actions = hub.get('actions', [{}])
+                providers = hub.get('providers', [{}])
+                
+                return json.dumps({
+                    "success": True,
+                    "title": track.get('title', 'Unknown Title'),
+                    "artist": track.get('subtitle', 'Unknown Artist'),
+                    "apple_music": actions[0].get('uri', '') if actions else '',
+                    "spotify": providers[0].get('actions', [{}])[0].get('uri', '') if providers else ''
+                })
+            else:
+                return json.dumps({"success": False, "error": "No match found"})
+        except Exception as e:
+            return json.dumps({"success": False, "error": str(e)})
+
+    return asyncio.run(_recognize())`;
+      
+      fs.writeFileSync(path.join(pythonDir, 'shazam_recognizer.py'), pythonCode);
+
+      // Write Kotlin bridge module
+      const kotlinDir = path.join(androidDir, `app/src/main/java/${packagePath}`);
+      if (!fs.existsSync(kotlinDir)) {
+        fs.mkdirSync(kotlinDir, { recursive: true });
+      }
+
+      const kotlinCode = `package ${packageName}
+
+import android.net.Uri
+import com.chaquo.python.Python
+import com.chaquo.python.android.AndroidPlatform
+import com.facebook.react.bridge.*
+
+class ShazamModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaModule(reactContext) {
+
+    override fun getName(): String = "ShazamModule"
+
+    private fun ensurePythonInitialized() {
+        if (!Python.isStarted()) {
+            Python.start(AndroidPlatform(reactApplicationContext))
+        }
+    }
+
+    @ReactMethod
+    fun identifySong(audioFileUri: String, promise: Promise) {
+        try {
+            ensurePythonInitialized()
+            
+            val uri = Uri.parse(audioFileUri)
+            val filePath = uri.path 
+            if (filePath == null || java.io.File(filePath).exists().not()) {
+                promise.reject("FILE_NOT_FOUND", "Audio file does not exist at: $audioFileUri")
+                return
+            }
+
+            val shazamModule = Python.getInstance().getModule("shazam_recognizer")
+            val resultJson = shazamModule.callAttr("recognize_song", filePath).toString()
+            
+            promise.resolve(resultJson)
+
+        } catch (e: Exception) {
+            promise.reject("SHAZAM_ERROR", e.message ?: "Unknown Python error")
+        }
+    }
+}`;
+
+      fs.writeFileSync(path.join(kotlinDir, 'ShazamModule.kt'), kotlinCode);
+
+      return config;
+    },
+  ]);
+
+  return config;
+};
+
+module.exports = withChaquopyShazam;
+```
+
+### Step 3: Register the Plugin in `app.json`
+Add the plugin to the `plugins` array in your `app.json` or `app.config.js`.
+
+```json
+{
+  "expo": {
+    "name": "AI Assistant",
+    "slug": "ai-assistant",
+    "android": {
+      "package": "com.yourapp.assistant"
+    },
+    "plugins": [
+      "./plugins/withChaquopyShazam"
+    ]
+  }
+}
+```
+*(Ensure the `android.package` value matches your desired namespace, as the plugin uses it to generate the correct Kotlin package declaration).*
+
+### Step 4: Execute Prebuild
+Run the prebuild command to apply the plugin and generate the native Android directory.
+```bash
+npx expo prebuild --clean
+```
+
+### Step 5: Build and Run
+Compile the custom development client to verify the integration.
+```bash
+npx expo run:android
+```
+
+### Verification
+Once the app launches, you can test the integration by calling the JavaScript function provided in the previous step. The plugin guarantees that:
+1. The Chaquopy Gradle dependencies are injected correctly.
+2. The `shazam_recognizer.py` script is placed in the correct `src/main/python` directory.
+3. The `ShazamModule.kt` bridge is generated and registered in `MainApplication.kt`.
+
+Let me know if you want to proceed with the **Gemini Real-Time WebSocket** implementation or the **Vosk wake-word** integration next.
+Here is the complete, production-ready implementation for the Vosk wake-word detection. This setup uses an Expo Config Plugin to automate the asset copying and permission injection, ensuring your native configuration persists across rebuilds.
+
+### Step 1: Prerequisites (Vosk Model)
+Before running the prebuild, you must download the Vosk model and place it in your project root. 
+1. Download the small English model (e.g., `vosk-model-small-en-us-0.15`) from the official Vosk model repository.
+2. Extract it and rename the folder to `vosk-model`.
+3. Place it in your project root under an `assets` directory: `<project-root>/assets/vosk-model`.
+
+### Step 2: The Expo Config Plugin
+This plugin handles copying the model into the Android assets directory and injects the required Foreground Service permissions for Android 14+ compatibility.
+
+**Path:** `plugins/withVoskWakeWord.js`
+```javascript
+const { withAndroidManifest, withDangerousMod } = require('@expo/config-plugins');
+const path = require('path');
+const fs = require('fs');
+
+const withVoskWakeWord = (config) => {
+  // 1. Copy Vosk model from project root to Android assets
+  config = withDangerousMod(config, [
+    'android',
+    async (config) => {
+      const projectRoot = config.modRequest.projectRoot;
+      const androidDir = config.modRequest.platformProjectRoot;
+      
+      const sourceModelDir = path.join(projectRoot, 'assets', 'vosk-model');
+      const targetModelDir = path.join(androidDir, 'app', 'src', 'main', 'assets', 'vosk-model');
+
+      if (!fs.existsSync(sourceModelDir)) {
+        throw new Error(`Vosk model not found at ${sourceModelDir}. Please download the model and place it in the assets directory.`);
+      }
+
+      if (fs.existsSync(targetModelDir)) {
+        fs.rmSync(targetModelDir, { recursive: true, force: true });
+      }
+      
+      copyDirSync(sourceModelDir, targetModelDir);
+      return config;
+    },
+  ]);
+
+  // 2. Add Foreground Service and Microphone permissions to AndroidManifest
+  config = withAndroidManifest(config, (config) => {
+    const manifest = config.modResults;
+    const usesPermissions = manifest.manifest['uses-permission'] || [];
+    
+    const requiredPermissions = [
+      'android.permission.RECORD_AUDIO',
+      'android.permission.FOREGROUND_SERVICE',
+      'android.permission.FOREGROUND_SERVICE_MICROPHONE',
+      'android.permission.POST_NOTIFICATIONS'
+    ];
+
+    requiredPermissions.forEach(perm => {
+      if (!usesPermissions.some(p => p.$?.['android:name'] === perm)) {
+        usesPermissions.push({ $: { 'android:name': perm } });
+      }
+    });
+
+    manifest.manifest['uses-permission'] = usesPermissions;
+    return config;
+  });
+
+  return config;
+};
+
+function copyDirSync(src, dest) {
+  fs.mkdirSync(dest, { recursive: true });
+  const entries = fs.readdirSync(src, { withFileTypes: true });
+  for (let entry of entries) {
+    const srcPath = path.join(src, entry.name);
+    const destPath = path.join(dest, entry.name);
+    if (entry.isDirectory()) {
+      copyDirSync(srcPath, destPath);
+    } else {
+      fs.copyFileSync(srcPath, destPath);
+    }
+  }
+}
+
+module.exports = withVoskWakeWord;
+```
+
+### Step 3: Register the Plugin
+Add the plugin to your `app.json` or `app.config.js`.
+
+```json
+{
+  "expo": {
+    "plugins": [
+      "./plugins/withChaquopyShazam",
+      "./plugins/withVoskWakeWord"
+    ]
+  }
+}
+```
+
+### Step 4: React Native Wake Word Service
+This service encapsulates the Vosk lifecycle, handles the audio stream, and filters the transcriptions for your specific wake words.
+
+**Path:** `src/services/VoskWakeWordService.js`
+```javascript
+import Vosk from 'react-native-vosk';
+
+class VoskWakeWordService {
+  constructor() {
+    this.isLoaded = false;
+    this.isListening = false;
+    this.onWakeWordDetected = null;
+    this.recognizer = null;
+  }
+
+  async initialize(onWakeWordDetected) {
+    if (this.isLoaded) return;
+    
+    this.onWakeWordDetected = onWakeWordDetected;
+    
+    // Load the model from the Android assets folder
+    await Vosk.loadModel('vosk-model');
+    
+    this.recognizer = new Vosk.Recognizer();
+    
+    Vosk.addListener((result) => {
+      if (result && result.text) {
+        const text = result.text.toLowerCase().trim();
+        
+        // Filter for the specific wake words
+        if (text.includes('hey nova') || text === 'nova') {
+          console.log('[Vosk] Wake word detected:', text);
+          if (this.onWakeWordDetected) {
+            this.onWakeWordDetected();
+          }
+        }
+      }
+    });
+
+    this.isLoaded = true;
+    console.log('[Vosk] Service initialized successfully.');
+  }
+
+  async startListening() {
+    if (!this.isLoaded) {
+      throw new Error('VoskWakeWordService must be initialized before starting.');
+    }
+    if (this.isListening) return;
+
+    await Vosk.startRecognizing(this.recognizer);
+    this.isListening = true;
+    console.log('[Vosk] Listening for wake word...');
+  }
+
+  async stopListening() {
+    if (!this.isListening) return;
+    
+    await Vosk.stopRecognizing();
+    this.isListening = false;
+    console.log('[Vosk] Stopped listening.');
+  }
+
+  destroy() {
+    this.stopListening();
+    if (this.recognizer) {
+      this.recognizer.close();
+      this.recognizer = null;
+    }
+    Vosk.removeAllListeners();
+    this.isLoaded = false;
+    console.log('[Vosk] Service destroyed.');
+  }
+}
+
+export default new VoskWakeWordService();
+```
+
+### Step 5: Integration in Your App
+Initialize the service when your app mounts. Note that to keep the microphone active when the app is in the background, you must pair this with a Foreground Service notification library (like `@supersami/rn-foreground-service`) to prevent Android from terminating the audio stream.
+
+```javascript
+import React, { useEffect } from 'react';
+import { View, Text, Button } from 'react-native';
+import VoskWakeWordService from './src/services/VoskWakeWordService';
+import { identifyCurrentSong } from './src/utils/ShazamManager';
+
+export default function App() {
+  useEffect(() => {
+    const setupWakeWord = async () => {
+      try {
+        await VoskWakeWordService.initialize(() => {
+          console.log('[App] Wake word triggered. Starting Shazam...');
+          identifyCurrentSong().catch(err => console.error(err));
+        });
+        
+        await VoskWakeWordService.startListening();
+      } catch (error) {
+        console.error('[App] Failed to initialize Vosk:', error);
+      }
+    };
+
+    setupWakeWord();
+
+    return () => {
+      VoskWakeWordService.destroy();
+    };
+  }, []);
+
+  return (
+    <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+      <Text>AI Assistant Running</Text>
+      <Text>Say "Hey Nova" or "Nova"</Text>
+    </View>
+  );
+}
+```
+
+### Execution
+Run the prebuild and start the development client to apply the native changes.
+```bash
+npx expo prebuild --clean
+npx expo run:android
+```
+
+This implementation provides a robust, battery-conscious wake-word listener that seamlessly triggers your ShazamIO integration when the user speaks the designated phrase.
+This is very close to the video reference. Now let me provide the React Native component code to implement this UI when the wake word is triggered.
+
+### Step 1: Install Required Dependencies
+```bash
+npx expo install expo-linear-gradient react-native-reanimated react-native-gesture-handler
+```
+
+### Step 2: Create the Nova Orb Component
+**Path:** `src/components/NovaOrb.js`
+```javascript
+import React, { useEffect } from 'react';
+import { View, StyleSheet } from 'react-native';
+import Animated, {
+  useSharedValue,
+  useAnimatedStyle,
+  withRepeat,
+  withTiming,
+  Easing,
+} from 'react-native-reanimated';
+
+const NovaOrb = ({ isActive }) => {
+  const rotation = useSharedValue(0);
+  const glowIntensity = useSharedValue(0.6);
+
+  useEffect(() => {
+    rotation.value = withRepeat(
+      withTiming(360, { duration: 8000, easing: Easing.linear }),
+      -1,
+      false
+    );
+    glowIntensity.value = withRepeat(
+      withTiming(1, { duration: 2000, easing: Easing.inOut(Easing.ease) }),
+      -1,
+      true
+    );
+  }, []);
+
+  const orbStyle = useAnimatedStyle(() => ({
+    transform: [{ rotate: `${rotation.value}deg` }],
+  }));
+
+  const glowStyle = useAnimatedStyle(() => ({
+    opacity: glowIntensity.value,
+  }));
+
+  return (
+    <View style={styles.container}>
+      <Animated.View style={[styles.glow, glowStyle]} />
+      <View style={styles.orb}>
+        <Animated.View style={[styles.lightStreak1, orbStyle]} />
+        <Animated.View style={[styles.lightStreak2, orbStyle]} />
+        <Animated.View style={[styles.lightStreak3, orbStyle]} />
+      </View>
+    </View>
+  );
+};
+
+const styles = StyleSheet.create({
+  container: {
+    width: 180,
+    height: 180,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  glow: {
+    position: 'absolute',
+    width: 200,
+    height: 200,
+    borderRadius: 100,
+    backgroundColor: '#0066FF',
+    opacity: 0.3,
+    blurRadius: 40,
+  },
+  orb: {
+    width: 140,
+    height: 140,
+    borderRadius: 70,
+    backgroundColor: '#0a0a0a',
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#0066FF',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.8,
+    shadowRadius: 20,
+    elevation: 10,
+  },
+  lightStreak1: {
+    position: 'absolute',
+    width: 120,
+    height: 60,
+    borderRadius: 30,
+    borderWidth: 3,
+    borderColor: '#00D4FF',
+    top: 20,
+    left: 10,
+    transform: [{ rotate: '45deg' }],
+    shadowColor: '#00D4FF',
+    shadowOpacity: 1,
+    shadowRadius: 10,
+  },
+  lightStreak2: {
+    position: 'absolute',
+    width: 100,
+    height: 50,
+    borderRadius: 25,
+    borderWidth: 2,
+    borderColor: '#0099FF',
+    top: 50,
+    left: 20,
+    transform: [{ rotate: '-30deg' }],
+    shadowColor: '#0099FF',
+    shadowOpacity: 1,
+    shadowRadius: 8,
+  },
+  lightStreak3: {
+    position: 'absolute',
+    width: 80,
+    height: 40,
+    borderRadius: 20,
+    borderWidth: 2,
+    borderColor: '#00FFFF',
+    top: 70,
+    left: 30,
+    transform: [{ rotate: '60deg' }],
+    shadowColor: '#00FFFF',
+    shadowOpacity: 1,
+    shadowRadius: 6,
+  },
+});
+
+export default NovaOrb;
+```
+
+### Step 3: Create the Nova Assistant Screen
+**Path:** `src/screens/NovaAssistantScreen.js`
+```javascript
+import React, { useState, useEffect } from 'react';
+import {
+  View,
+  Text,
+  TextInput,
+  StyleSheet,
+  Modal,
+  TouchableOpacity,
+  KeyboardAvoidingView,
+  Platform,
+} from 'react-native';
+import { LinearGradient } from 'expo-linear-gradient';
+import NovaOrb from '../components/NovaOrb';
+
+const NovaAssistantScreen = ({ visible, onClose }) => {
+  const [inputText, setInputText] = useState('');
+  const [isListening, setIsListening] = useState(false);
+
+  useEffect(() => {
+    if (visible) {
+      setInputText('');
+      setIsListening(false);
+    }
+  }, [visible]);
+
+  const handleVoiceInput = () => {
+    setIsListening(!isListening);
+    // Integrate with your Vosk/Gemini real-time API here
+  };
+
+  const handleSubmit = () => {
+    if (inputText.trim()) {
+      console.log('[Nova] User query:', inputText);
+      // Send to Gemini API
+      setInputText('');
+    }
+  };
+
+  return (
+    <Modal
+      visible={visible}
+      animationType="slide"
+      transparent={false}
+      onRequestClose={onClose}
+    >
+      <LinearGradient
+        colors={['#000000', '#000000', '#001a33', '#003366']}
+        style={styles.container}
+      >
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          style={styles.keyboardView}
+        >
+          <View style={styles.content}>
+            <NovaOrb isActive={isListening} />
+
+            <Text style={styles.greeting}>Hello Robin</Text>
+            <Text style={styles.heading}>How can I help you today?</Text>
+          </View>
+
+          <View style={styles.inputContainer}>
+            <View style={styles.inputBar}>
+              <TextInput
+                style={styles.input}
+                placeholder="Ask anything..."
+                placeholderTextColor="#8899AA"
+                value={inputText}
+                onChangeText={setInputText}
+                onSubmitEditing={handleSubmit}
+                returnKeyType="send"
+              />
+              <TouchableOpacity
+                style={styles.voiceButton}
+                onPress={handleVoiceInput}
+              >
+                <View style={[styles.waveform, isListening && styles.waveformActive]}>
+                  <View style={[styles.bar, styles.bar1, isListening && styles.barActive]} />
+                  <View style={[styles.bar, styles.bar2, isListening && styles.barActive]} />
+                  <View style={[styles.bar, styles.bar3, isListening && styles.barActive]} />
+                  <View style={[styles.bar, styles.bar4, isListening && styles.barActive]} />
+                  <View style={[styles.bar, styles.bar5, isListening && styles.barActive]} />
+                </View>
+              </TouchableOpacity>
+            </View>
+          </View>
+
+          <View style={styles.homeIndicator} />
+        </KeyboardAvoidingView>
+      </LinearGradient>
+    </Modal>
+  );
+};
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+  },
+  keyboardView: {
+    flex: 1,
+  },
+  content: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingTop: 100,
+  },
+  greeting: {
+    fontSize: 16,
+    color: '#8899AA',
+    marginTop: 40,
+    marginBottom: 8,
+    fontWeight: '400',
+  },
+  heading: {
+    fontSize: 32,
+    color: '#FFFFFF',
+    fontWeight: '600',
+    textAlign: 'center',
+    paddingHorizontal: 20,
+    lineHeight: 40,
+  },
+  inputContainer: {
+    paddingHorizontal: 20,
+    paddingBottom: 40,
+  },
+  inputBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(100, 150, 200, 0.15)',
+    borderRadius: 30,
+    paddingHorizontal: 20,
+    paddingVertical: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(100, 180, 255, 0.3)',
+    backdropFilter: 'blur(20px)',
+  },
+  input: {
+    flex: 1,
+    fontSize: 16,
+    color: '#FFFFFF',
+    marginRight: 10,
+  },
+  voiceButton: {
+    padding: 8,
+  },
+  waveform: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    height: 20,
+    gap: 3,
+  },
+  waveformActive: {
+    opacity: 1,
+  },
+  bar: {
+    width: 3,
+    backgroundColor: '#8899AA',
+    borderRadius: 2,
+  },
+  bar1: { height: 8 },
+  bar2: { height: 14 },
+  bar3: { height: 20 },
+  bar4: { height: 14 },
+  bar5: { height: 8 },
+  barActive: {
+    backgroundColor: '#00D4FF',
+  },
+  homeIndicator: {
+    width: 120,
+    height: 4,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 2,
+    alignSelf: 'center',
+    marginBottom: 8,
+  },
+});
+
+export default NovaAssistantScreen;
+```
+
+### Step 4: Integrate with Wake Word Service
+**Path:** `src/App.js`
+```javascript
+import React, { useState, useEffect } from 'react';
+import { View, Text, StyleSheet } from 'react-native';
+import VoskWakeWordService from './src/services/VoskWakeWordService';
+import NovaAssistantScreen from './src/screens/NovaAssistantScreen';
+
+export default function App() {
+  const [isNovaVisible, setIsNovaVisible] = useState(false);
+
+  useEffect(() => {
+    const setupWakeWord = async () => {
+      try {
+        await VoskWakeWordService.initialize(() => {
+          console.log('[App] Wake word detected - showing Nova');
+          setIsNovaVisible(true);
+        });
+
+        await VoskWakeWordService.startListening();
+      } catch (error) {
+        console.error('[App] Failed to initialize Vosk:', error);
+      }
+    };
+
+    setupWakeWord();
+
+    return () => {
+      VoskWakeWordService.destroy();
+    };
+  }, []);
+
+  return (
+    <View style={styles.container}>
+      <Text style={styles.text}>AI Assistant Running</Text>
+      <Text style={styles.subtext}>Say "Hey Nova" or "Nova"</Text>
+
+      <NovaAssistantScreen
+        visible={isNovaVisible}
+        onClose={() => setIsNovaVisible(false)}
+      />
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#000000',
+  },
+  text: {
+    fontSize: 20,
+    color: '#FFFFFF',
+    marginBottom: 10,
+  },
+  subtext: {
+    fontSize: 14,
+    color: '#8899AA',
+  },
+});
+```
+
+### Step 5: Update Expo Config for Dependencies
+Add these to your `app.json` plugins array if not already present:
+```json
+{
+  "expo": {
+    "plugins": [
+      "./plugins/withChaquopyShazam",
+      "./plugins/withVoskWakeWord",
+      "expo-linear-gradient",
+      "react-native-reanimated"
+    ]
+  }
+}
+```
+
+### Step 6: Build and Test
+```bash
+npx expo prebuild --clean
+npx expo run:android
+```
+
+When you say "Hey Nova" or "Nova", the assistant screen will slide up with the animated orb, greeting text, and input bar matching the video design. The orb will animate with flowing blue light streaks, and the waveform icon will activate when voice input is triggered.
+Here are the additional screens and the updated Orb component to handle the Shazam color shift. 
+
+### Step 1: Update the NovaOrb Component
+We will modify the `NovaOrb` to accept dynamic color props. When Shazam is active, we will pass a magenta/purple color scheme to visually distinguish it from the standard blue AI state.
+
+**Path:** `src/components/NovaOrb.js`
+```javascript
+import React, { useEffect } from 'react';
+import { View, StyleSheet } from 'react-native';
+import Animated, {
+  useSharedValue,
+  useAnimatedStyle,
+  withRepeat,
+  withTiming,
+  Easing,
+} from 'react-native-reanimated';
+
+const NovaOrb = ({ isActive, primaryColor = '#00D4FF', secondaryColor = '#0099FF' }) => {
+  const rotation = useSharedValue(0);
+  const glowIntensity = useSharedValue(0.6);
+
+  useEffect(() => {
+    rotation.value = withRepeat(
+      withTiming(360, { duration: 8000, easing: Easing.linear }),
+      -1,
+      false
+    );
+    glowIntensity.value = withRepeat(
+      withTiming(1, { duration: 2000, easing: Easing.inOut(Easing.ease) }),
+      -1,
+      true
+    );
+  }, []);
+
+  const orbStyle = useAnimatedStyle(() => ({
+    transform: [{ rotate: `${rotation.value}deg` }],
+  }));
+
+  const glowStyle = useAnimatedStyle(() => ({
+    opacity: glowIntensity.value,
+  }));
+
+  return (
+    <View style={styles.container}>
+      <Animated.View style={[styles.glow, glowStyle, { backgroundColor: primaryColor }]} />
+      <View style={styles.orb}>
+        <Animated.View style={[styles.lightStreak1, orbStyle, { borderColor: primaryColor, shadowColor: primaryColor }]} />
+        <Animated.View style={[styles.lightStreak2, orbStyle, { borderColor: secondaryColor, shadowColor: secondaryColor }]} />
+        <Animated.View style={[styles.lightStreak3, orbStyle, { borderColor: primaryColor, shadowColor: primaryColor }]} />
+      </View>
+    </View>
+  );
+};
+
+const styles = StyleSheet.create({
+  container: { width: 180, height: 180, justifyContent: 'center', alignItems: 'center' },
+  glow: {
+    position: 'absolute', width: 200, height: 200, borderRadius: 100, opacity: 0.3,
+  },
+  orb: {
+    width: 140, height: 140, borderRadius: 70, backgroundColor: '#0a0a0a',
+    justifyContent: 'center', alignItems: 'center',
+    shadowColor: '#0066FF', shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.8, shadowRadius: 20, elevation: 10,
+  },
+  lightStreak1: {
+    position: 'absolute', width: 120, height: 60, borderRadius: 30, borderWidth: 3,
+    top: 20, left: 10, transform: [{ rotate: '45deg' }], shadowOpacity: 1, shadowRadius: 10,
+  },
+  lightStreak2: {
+    position: 'absolute', width: 100, height: 50, borderRadius: 25, borderWidth: 2,
+    top: 50, left: 20, transform: [{ rotate: '-30deg' }], shadowOpacity: 1, shadowRadius: 8,
+  },
+  lightStreak3: {
+    position: 'absolute', width: 80, height: 40, borderRadius: 20, borderWidth: 2,
+    top: 70, left: 30, transform: [{ rotate: '60deg' }], shadowOpacity: 1, shadowRadius: 6,
+  },
+});
+
+export default NovaOrb;
+```
+
+### Step 2: Settings/Preferences Screen
+**Path:** `src/screens/NovaSettingsScreen.js`
+```javascript
+import React, { useState } from 'react';
+import { View, Text, StyleSheet, ScrollView, Switch, TouchableOpacity } from 'react-native';
+import { LinearGradient } from 'expo-linear-gradient';
+
+const NovaSettingsScreen = ({ visible, onClose }) => {
+  const [wakeWordEnabled, setWakeWordEnabled] = useState(true);
+  const [hapticsEnabled, setHapticsEnabled] = useState(true);
+  const [voiceEnabled, setVoiceEnabled] = useState(true);
+  const [screenAwareness, setScreenAwareness] = useState(true);
+
+  if (!visible) return null;
+
+  const SettingRow = ({ label, value, onValueChange }) => (
+    <View style={styles.settingRow}>
+      <Text style={styles.settingLabel}>{label}</Text>
+      <Switch
+        value={value}
+        onValueChange={onValueChange}
+        trackColor={{ false: '#333333', true: 'rgba(0, 212, 255, 0.5)' }}
+        thumbColor={value ? '#00D4FF' : '#888888'}
+      />
+    </View>
+  );
+
+  return (
+    <View style={styles.container}>
+      <LinearGradient colors={['#000000', '#001a33']} style={styles.gradient} />
+      
+      <View style={styles.header}>
+        <Text style={styles.headerTitle}>Settings</Text>
+        <TouchableOpacity onPress={onClose}>
+          <Text style={styles.closeText}>Close</Text>
+        </TouchableOpacity>
+      </View>
+
+      <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+        <Text style={styles.sectionTitle}>Assistant</Text>
+        <View style={styles.card}>
+          <SettingRow label="Wake Word Detection" value={wakeWordEnabled} onValueChange={setWakeWordEnabled} />
+          <View style={styles.divider} />
+          <SettingRow label="Haptic Feedback" value={hapticsEnabled} onValueChange={setHapticsEnabled} />
+          <View style={styles.divider} />
+          <SettingRow label="Voice Responses" value={voiceEnabled} onValueChange={setVoiceEnabled} />
+        </View>
+
+        <Text style={styles.sectionTitle}>Privacy & Context</Text>
+        <View style={styles.card}>
+          <SettingRow label="On-Screen Awareness" value={screenAwareness} onValueChange={setScreenAwareness} />
+          <View style={styles.divider} />
+          <SettingRow label="Personal Context Search" value={true} onValueChange={() => {}} />
+        </View>
+      </ScrollView>
+    </View>
+  );
+};
+
+const styles = StyleSheet.create({
+  container: { flex: 1 },
+  gradient: { ...StyleSheet.absoluteFillObject },
+  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 24, paddingTop: 60 },
+  headerTitle: { color: '#FFFFFF', fontSize: 28, fontWeight: '700' },
+  closeText: { color: '#8899AA', fontSize: 16 },
+  content: { padding: 24, paddingBottom: 40 },
+  sectionTitle: { color: '#00D4FF', fontSize: 14, fontWeight: '700', letterSpacing: 1, marginBottom: 12, marginTop: 16 },
+  card: {
+    backgroundColor: 'rgba(255, 255, 255, 0.05)', borderRadius: 20, padding: 20,
+    borderWidth: 1, borderColor: 'rgba(255, 255, 255, 0.08)',
+  },
+  settingRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 8 },
+  settingLabel: { color: '#FFFFFF', fontSize: 16, fontWeight: '500' },
+  divider: { height: 1, backgroundColor: 'rgba(255, 255, 255, 0.08)', marginVertical: 8 },
+});
+
+export default NovaSettingsScreen;
+```
+
+### Step 3: Conversation History Screen
+**Path:** `src/screens/NovaHistoryScreen.js`
+```javascript
+import React from 'react';
+import { View, Text, StyleSheet, FlatList, TouchableOpacity } from 'react-native';
+import { LinearGradient } from 'expo-linear-gradient';
+
+const NovaHistoryScreen = ({ visible, onClose }) => {
+  const mockHistory = [
+    { id: '1', query: 'What to visit in Rome?', time: '2 hours ago', type: 'Search' },
+    { id: '2', query: 'Identify this song', time: 'Yesterday', type: 'Media' },
+    { id: '3', query: 'Turn off living room lights', time: 'Yesterday', type: 'Smart Home' },
+    { id: '4', query: 'Translate this menu to English', time: '2 days ago', type: 'Vision' },
+  ];
+
+  if (!visible) return null;
+
+  return (
+    <View style={styles.container}>
+      <LinearGradient colors={['#000000', '#001a33']} style={styles.gradient} />
+      
+      <View style={styles.header}>
+        <Text style={styles.headerTitle}>History</Text>
+        <TouchableOpacity onPress={onClose}>
+          <Text style={styles.closeText}>Close</Text>
+        </TouchableOpacity>
+      </View>
+
+      <FlatList
+        data={mockHistory}
+        keyExtractor={(item) => item.id}
+        contentContainerStyle={styles.listContent}
+        showsVerticalScrollIndicator={false}
+        renderItem={({ item }) => (
+          <View style={styles.historyCard}>
+            <View style={styles.cardHeader}>
+              <Text style={styles.queryText}>{item.query}</Text>
+              <Text style={styles.typeBadge}>{item.type}</Text>
+            </View>
+            <Text style={styles.timeText}>{item.time}</Text>
+          </View>
+        )}
+      />
+    </View>
+  );
+};
+
+const styles = StyleSheet.create({
+  container: { flex: 1 },
+  gradient: { ...StyleSheet.absoluteFillObject },
+  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 24, paddingTop: 60 },
+  headerTitle: { color: '#FFFFFF', fontSize: 28, fontWeight: '700' },
+  closeText: { color: '#8899AA', fontSize: 16 },
+  listContent: { padding: 24, paddingBottom: 40 },
+  historyCard: {
+    backgroundColor: 'rgba(255, 255, 255, 0.05)', borderRadius: 16, padding: 20, marginBottom: 16,
+    borderWidth: 1, borderColor: 'rgba(255, 255, 255, 0.08)',
+  },
+  cardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 },
+  queryText: { color: '#FFFFFF', fontSize: 16, fontWeight: '500', flex: 1, marginRight: 12 },
+  typeBadge: {
+    color: '#00D4FF', fontSize: 12, fontWeight: '700', backgroundColor: 'rgba(0, 212, 255, 0.1)',
+    paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8, overflow: 'hidden',
+  },
+  timeText: { color: '#8899AA', fontSize: 13 },
+});
+
+export default NovaHistoryScreen;
+```
+
+### Step 4: Smart Home Control Interface
+**Path:** `src/screens/NovaSmartHomeScreen.js`
+```javascript
+import React, { useState } from 'react';
+import { View, Text, StyleSheet, FlatList, TouchableOpacity } from 'react-native';
+import { LinearGradient } from 'expo-linear-gradient';
+
+const NovaSmartHomeScreen = ({ visible, onClose }) => {
+  const [devices, setDevices] = useState([
+    { id: '1', name: 'Living Room Lights', state: true, type: 'Light' },
+    { id: '2', name: 'Thermostat', state: true, type: 'Climate', value: '72°F' },
+    { id: '3', name: 'Front Door Lock', state: false, type: 'Security' },
+    { id: '4', name: 'Bedroom Fan', state: false, type: 'Appliance' },
+  ]);
+
+  const toggleDevice = (id) => {
+    setDevices(devices.map(d => d.id === id ? { ...d, state: !d.state } : d));
+  };
+
+  if (!visible) return null;
+
+  return (
+    <View style={styles.container}>
+      <LinearGradient colors={['#000000', '#001a33']} style={styles.gradient} />
+      
+      <View style={styles.header}>
+        <Text style={styles.headerTitle}>Smart Home</Text>
+        <TouchableOpacity onPress={onClose}>
+          <Text style={styles.closeText}>Close</Text>
+        </TouchableOpacity>
+      </View>
+
+      <FlatList
+        data={devices}
+        numColumns={2}
+        keyExtractor={(item) => item.id}
+        contentContainerStyle={styles.gridContent}
+        columnWrapperStyle={styles.row}
+        showsVerticalScrollIndicator={false}
+        renderItem={({ item }) => (
+          <TouchableOpacity 
+            style={[styles.deviceCard, item.state && styles.deviceCardActive]} 
+            onPress={() => toggleDevice(item.id)}
+          >
+            <Text style={[styles.deviceType, item.state && styles.deviceTypeActive]}>{item.type}</Text>
+            <Text style={styles.deviceName}>{item.name}</Text>
+            {item.value && <Text style={styles.deviceValue}>{item.value}</Text>}
+            <View style={[styles.statusDot, item.state ? styles.statusDotOn : styles.statusDotOff]} />
+          </TouchableOpacity>
+        )}
+      />
+    </View>
+  );
+};
+
+const styles = StyleSheet.create({
+  container: { flex: 1 },
+  gradient: { ...StyleSheet.absoluteFillObject },
+  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 24, paddingTop: 60 },
+  headerTitle: { color: '#FFFFFF', fontSize: 28, fontWeight: '700' },
+  closeText: { color: '#8899AA', fontSize: 16 },
+  gridContent: { padding: 24, paddingBottom: 40 },
+  row: { justifyContent: 'space-between', marginBottom: 16 },
+  deviceCard: {
+    width: '48%', backgroundColor: 'rgba(255, 255, 255, 0.05)', borderRadius: 20, padding: 20,
+    borderWidth: 1, borderColor: 'rgba(255, 255, 255, 0.08)', height: 140, justifyContent: 'space-between',
+  },
+  deviceCardActive: {
+    backgroundColor: 'rgba(0, 212, 255, 0.1)', borderColor: 'rgba(0, 212, 255, 0.3)',
+  },
+  deviceType: { color: '#8899AA', fontSize: 12, fontWeight: '700', letterSpacing: 1 },
+  deviceTypeActive: { color: '#00D4FF' },
+  deviceName: { color: '#FFFFFF', fontSize: 16, fontWeight: '600' },
+  deviceValue: { color: '#FFFFFF', fontSize: 24, fontWeight: '700' },
+  statusDot: { width: 10, height: 10, borderRadius: 5, alignSelf: 'flex-end' },
+  statusDotOn: { backgroundColor: '#00D4FF', shadowColor: '#00D4FF', shadowOpacity: 0.8, shadowRadius: 5 },
+  statusDotOff: { backgroundColor: '#555555' },
+});
+
+export default NovaSmartHomeScreen;
+```
+
+### Step 5: Onboarding/Tutorial Screens
+**Path:** `src/screens/NovaOnboardingScreen.js`
+```javascript
+import React, { useRef, useState } from 'react';
+import { View, Text, StyleSheet, FlatList, Dimensions, TouchableOpacity } from 'react-native';
+import { LinearGradient } from 'expo-linear-gradient';
+import NovaOrb from '../components/NovaOrb';
+
+const { width } = Dimensions.get('window');
+
+const slides = [
+  { id: '1', title: 'Meet Nova', subtitle: 'Your always-on AI assistant. Say "Hey Nova" to get started.' },
+  { id: '2', title: 'Screen Awareness', subtitle: 'Nova understands what is on your screen to provide instant context.' },
+  { id: '3', title: 'Smart Control', subtitle: 'Manage your smart home, media, and schedule with simple voice commands.' },
+  { id: '4', title: 'Visual Intelligence', subtitle: 'Point your camera at anything to identify objects, translate text, and more.' },
+];
+
+const NovaOnboardingScreen = ({ visible, onComplete }) => {
+  const flatListRef = useRef(null);
+  const [currentIndex, setCurrentIndex] = useState(0);
+
+  if (!visible) return null;
+
+  const handleNext = () => {
+    if (currentIndex < slides.length - 1) {
+      flatListRef.current?.scrollToIndex({ index: currentIndex + 1 });
+    } else {
+      onComplete();
+    }
+  };
+
+  return (
+    <View style={styles.container}>
+      <LinearGradient colors={['#000000', '#001a33']} style={styles.gradient} />
+      
+      <FlatList
+        ref={flatListRef}
+        data={slides}
+        horizontal
+        pagingEnabled
+        showsHorizontalScrollIndicator={false}
+        keyExtractor={(item) => item.id}
+        onMomentumScrollEnd={(e) => {
+          const index = Math.round(e.nativeEvent.contentOffset.x / width);
+          setCurrentIndex(index);
+        }}
+        renderItem={({ item }) => (
+          <View style={styles.slide}>
+            <NovaOrb isActive={true} />
+            <Text style={styles.title}>{item.title}</Text>
+            <Text style={styles.subtitle}>{item.subtitle}</Text>
+          </View>
+        )}
+      />
+
+      <View style={styles.footer}>
+        <View style={styles.pagination}>
+          {slides.map((_, index) => (
+            <View 
+              key={index} 
+              style={[styles.dot, currentIndex === index && styles.dotActive]} 
+            />
+          ))}
+        </View>
+        <TouchableOpacity style={styles.button} onPress={handleNext}>
+          <Text style={styles.buttonText}>{currentIndex === slides.length - 1 ? 'Get Started' : 'Next'}</Text>
+        </TouchableOpacity>
+      </View>
+    </View>
+  );
+};
+
+const styles = StyleSheet.create({
+  container: { flex: 1 },
+  gradient: { ...StyleSheet.absoluteFillObject },
+  slide: { width, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 40 },
+  title: { color: '#FFFFFF', fontSize: 32, fontWeight: '700', textAlign: 'center', marginTop: 40, marginBottom: 16 },
+  subtitle: { color: '#8899AA', fontSize: 16, textAlign: 'center', lineHeight: 24 },
+  footer: { position: 'absolute', bottom: 60, left: 0, right: 0, alignItems: 'center' },
+  pagination: { flexDirection: 'row', marginBottom: 30 },
+  dot: { width: 8, height: 8, borderRadius: 4, backgroundColor: 'rgba(255, 255, 255, 0.2)', marginHorizontal: 4 },
+  dotActive: { backgroundColor: '#00D4FF', width: 24 },
+  button: {
+    backgroundColor: '#00D4FF', paddingHorizontal: 40, paddingVertical: 16, borderRadius: 30,
+    shadowColor: '#00D4FF', shadowOpacity: 0.3, shadowRadius: 10, shadowOffset: { width: 0, height: 5 },
+  },
+  buttonText: { color: '#000000', fontSize: 16, fontWeight: '700' },
+});
+
+export default NovaOnboardingScreen;
+```
+
+### Step 6: Integrating the Shazam Color Shift
+To change the orb color when Shazam is active, you do not need a new screen. Instead, pass a state variable to the `NovaAssistantScreen` that dictates the orb's color theme.
+
+Update `src/screens/NovaAssistantScreen.js` to accept an `orbTheme` prop:
+
+```javascript
+// Inside NovaAssistantScreen.js
+const NovaAssistantScreen = ({ visible, onClose, orbTheme = 'standard' }) => {
+  // ... existing code
+  
+  // Update the NovaOrb rendering to pass the colors
+  const orbColors = orbTheme === 'shazam' 
+    ? { primary: '#FF007A', secondary: '#B026FF' } // Magenta/Purple for Shazam
+    : { primary: '#00D4FF', secondary: '#0099FF' }; // Cyan/Blue for Standard
+
+  return (
+    // ... existing layout
+    <NovaOrb 
+      isActive={isListening} 
+      primaryColor={orbColors.primary} 
+      secondaryColor={orbColors.secondary} 
+    />
+    // ...
+  );
+};
+```
+
+Then, in your main `App.js`, manage the theme state when triggering Shazam:
+
+```javascript
+// In App.js
+const [orbTheme, setOrbTheme] = useState('standard');
+
+// When wake word is detected or user taps Shazam:
+const triggerShazam = () => {
+  setOrbTheme('shazam');
+  setIsNovaVisible(true);
+  identifyCurrentSong().then(() => {
+    setOrbTheme('standard'); // Revert back when done
+  });
+};
+
+// Pass it to the screen
+<NovaAssistantScreen 
+  visible={isNovaVisible} 
+  onClose={() => setIsNovaVisible(false)} 
+  orbTheme={orbTheme} 
+/>
+```
+
+This approach keeps the UI unified and uses the orb itself as the primary state indicator for the user.

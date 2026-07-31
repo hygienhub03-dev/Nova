@@ -52,7 +52,9 @@
     "extra": {
       "eas": {
         "projectId": "your-eas-project-id"
-      }
+      },
+      "GEMINI_API_KEY": "",
+      "GEMINI_MODEL": "gemini-2.5-flash-native-audio-latest"
     },
     "owner": "nova"
   }

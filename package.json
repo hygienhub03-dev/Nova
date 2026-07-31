@@ -34,12 +34,19 @@
     "@react-navigation/native": "^6.1.0",
     "@react-navigation/native-stack": "^6.9.0",
     "@react-native-async-storage/async-storage": "1.21.0",
-    "@react-native-voice/voice": "^0.3.0",
+    "react-native-voice": "^0.3.0",
     "axios": "^1.6.0",
-    "react-native-markdown-display": "7.0.0",
+    "react-native-markdown-display": "^7.0.0",
     "react-native-dotenv": "^3.4.0",
-    "expo-orb": "~--",
-    "react-native-vector-icons": "14.0.0"
+    "react-native-vector-icons": "10.3.0",
+    "react-native-qrcode-svg": "^6.3.21",
+    "react-native-paper": "^5.12.0",
+    "ws": "^8.18.0",
+    "rxjs": "^7.8.0",
+    "expo-secure-store": "~12.3.0",
+    "@composio/core": "^0.10.0",
+    "@composio/openai-agents": "^0.10.1",
+    "@openai/agents": "^0.14.0"
   },
   "devDependencies": {
     "@babel/core": "^7.20.0",

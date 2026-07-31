@@ -3,6 +3,7 @@ import * as Linking from 'expo-linking';
 import { Camera } from 'expo-camera';
 import { VolumeManager } from 'react-native-volume-manager';
 import * as Speech from 'expo-speech';
+import { AssistantEngine } from './AssistantEngine';
 
 export class DeviceController {
 
@@ -72,6 +73,8 @@ export class DeviceController {
         return await DeviceController.speakText(data.text);
       case 'open_web':
         return DeviceController.openWeb(data.url);
+      case 'composio_execute':
+        return await AssistantEngine.composioExecute(data.tool, data.params || {});
       default:
         return 'Unknown action.';
     }
