@@ -1,4 +1,5 @@
 import * as SQLite from 'expo-sqlite';
+// @ts-ignore - openDatabaseSync may not be available in this version
 import { MemoryEngine } from './MemoryEngine';
 
 const db = SQLite.openDatabaseSync('nova_habits.db');

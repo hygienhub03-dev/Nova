@@ -1,4 +1,5 @@
 import WebSocket from 'ws';
+// @ts-ignore - ws types may not be available
 
 interface GeminiLiveMessage {
   setup?: {

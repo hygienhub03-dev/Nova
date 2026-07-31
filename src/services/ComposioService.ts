@@ -1,4 +1,5 @@
 import { Composio } from "@composio/core";
+// @ts-ignore - types may not be available for @composio/openai-agents
 import { OpenAIAgentsProvider } from "@composio/openai-agents";
 
 const COMPOSIO_API_KEY =
@@ -47,7 +48,9 @@ export class ComposioService {
 
   static async runAgentTask(agent: any, task: string): Promise<any> {
     await ComposioService.initialize();
-    const { run } = await import("@openai/agents");
+    // @ts-ignore - dynamic import for @openai/agents
+    const agentsModule = await import("@openai/agents");
+    const run = agentsModule.run;
     const result = await run(agent, task);
     return result;
   }

@@ -5,12 +5,12 @@ import {
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Audio } from 'expo-av';
-import { useNavigation } from '@react-navigation/native';
+// @ts-ignore - expo-av types may not be available
+import { NavigationProp } from '@react-navigation/native';
 import { recognizeSong, ShazamResult } from '../modules/ShazamModule';
 import * as Haptics from 'expo-haptics';
 
-export default function ShazamScreen() {
-  const navigation = useNavigation();
+export default function ShazamScreen({ navigation }: { navigation: NavigationProp<any> }) {
   const [isRecording, setIsRecording] = useState(false);
   const [isRecognizing, setIsRecognizing] = useState(false);
   const [result, setResult] = useState<ShazamResult | null>(null);

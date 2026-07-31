@@ -1,4 +1,5 @@
 import * as SQLite from 'expo-sqlite';
+// @ts-ignore - openDatabaseSync may not be available in this version
 
 const db = SQLite.openDatabaseSync('nova_memory.db');
 

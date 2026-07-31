@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
-  View, Text, TextInput, TouchableOpacity, FlatList, KeyboardAvoidingView, Platform, StyleSheet, InteractionManager, StatusBar, ScrollView
+  View, Text, TextInput, TouchableOpacity, FlatList, KeyboardAvoidingView, Platform, StyleSheet, InteractionManager, StatusBar, ScrollView, Alert
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import Voice from '@react-native-voice/voice';
@@ -9,23 +9,24 @@ import * as Haptics from 'expo-haptics';
 import Markdown from 'react-native-markdown-display';
 import Animated, { FadeInUp, FadeInDown } from 'react-native-reanimated';
 import { setOrbActivity } from 'expo-orb';
-import AssistantEngine from '../services/AssistantEngine';
-import DeviceController from '../services/DeviceController';
+import { AssistantEngine } from '../services/AssistantEngine';
+import { DeviceController } from '../services/DeviceController';
 import { HabitEngine } from '../services/HabitEngine';
 import MessageBubble from '../components/MessageBubble';
 import Orb from '../components/Orb';
 import VoiceButton from '../components/VoiceButton';
 import SmartHomeWidget from '../components/home/SmartHomeWidget';
 
-import { useNavigation } from '@react-navigation/native';
+import { NavigationProp } from '@react-navigation/native';
 
-export default function HomeScreen({ navigation }: { navigation: any }) {
+export default function HomeScreen({ navigation }: { navigation: NavigationProp<any> }) {
   const [messages, setMessages] = useState<any[]>([]);
   const [inputText, setInputText] = useState('');
   const [isListening, setIsListening] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [isOffline, setIsOffline] = useState(false);
   const [proactiveSuggestions, setProactiveSuggestions] = useState<any[]>([]);
+  const [ttsEnabled, setTtsEnabled] = useState(true);
   const flatListRef = useRef<FlatList>(null);
 
   useEffect(() => {
@@ -65,7 +66,7 @@ export default function HomeScreen({ navigation }: { navigation: any }) {
       setOrbActivity(0.8);
     };
 
-    Voice.onSpeechResults = (e) => {
+    Voice.onSpeechResults = (e: any) => {
       const text = e.value?.[0];
       if (text) {
         setInputText('');
@@ -79,7 +80,7 @@ export default function HomeScreen({ navigation }: { navigation: any }) {
       InteractionManager.runAfterInteractions(() => {});
     };
 
-    Voice.onSpeechError = (e) => {
+    Voice.onSpeechError = (e: any) => {
       console.error('Voice error:', e.error);
       setIsListening(false);
       setOrbActivity(0.1);

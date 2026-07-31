@@ -240,7 +240,10 @@ export class AssistantEngine {
   static async composioExecute(tool: string, params: Record<string, any>): Promise<string> {
     try {
       await ComposioService.initialize();
-      const { Agent, run } = await import('@openai/agents');
+      // @ts-ignore - dynamic import for @openai/agents
+      const agentsModule = await import('@openai/agents');
+      const Agent = agentsModule.Agent;
+      const run = agentsModule.run;
       const tools = await ComposioService.getTools();
       const agent = new Agent({
         name: 'Composio Executor',
