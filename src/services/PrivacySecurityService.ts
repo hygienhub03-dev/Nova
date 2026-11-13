@@ -1,4 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+// @ts-ignore - expo-crypto types may not be available
 import * as Crypto from 'expo-crypto';
 
 export interface Permission {

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, TextInput, TouchableOpacity, FlatList, ScrollView } from 'react-native';
+import { View, Text, StyleSheet, TextInput, TouchableOpacity, FlatList, ScrollView, Alert } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { HabitEngine } from '../services/HabitEngine';
 import { SmartHomeDeviceManager } from '../services/SmartHomeDeviceManager';
@@ -84,68 +84,65 @@ export default function GlobalExecutionScreen({ navigation }: any) {
 
   return (
     <LinearGradient colors={['#000', '#0a1628', '#1e3a5f']} style={styles.container}>
-      <FlatList
-        data={[]}
-        ListHeaderComponent={
-          <View>
-            <Text style={styles.title}>Global Execution</Text>
-            <Text style={styles.subtitle}>One-step complex operations across devices</Text>
+      <ScrollView style={styles.scrollView}>
+        <View>
+          <Text style={styles.title}>Global Execution</Text>
+          <Text style={styles.subtitle}>One-step complex operations across devices</Text>
 
-            <TextInput style={styles.input} placeholder="Routine name (e.g. Prepare Car)" placeholderTextColor="#666" value={name} onChangeText={setName} />
+          <TextInput style={styles.input} placeholder="Routine name (e.g. Prepare Car)" placeholderTextColor="#666" value={name} onChangeText={setName} />
 
-            <Text style={styles.sectionTitle}>Action Steps</Text>
+          <Text style={styles.sectionTitle}>Action Steps</Text>
 
-            {steps.map((step) => (
-              <View key={step.id} style={styles.stepCard}>
-                <View style={styles.stepRow}>
-                  <Text style={styles.stepNum}>#{steps.indexOf(step) + 1}</Text>
-                  <TextInput style={[styles.input, styles.stepInput]} placeholder="Device ID" placeholderTextColor="#666" value={step.deviceId} onChangeText={(t) => updateStep(step.id, 'deviceId', t)} />
-                </View>
-                <View style={styles.stepRow}>
-                  <TextInput style={[styles.input, styles.stepInput]} placeholder="Action (toggle, setTemperature, open)" placeholderTextColor="#666" value={step.action} onChangeText={(t) => updateStep(step.id, 'action', t)} />
-                  <TextInput style={[styles.input, styles.stepInput]} placeholder="Value" placeholderTextColor="#666" value={String(step.value)} onChangeText={(t) => updateStep(step.id, 'value', t)} />
-                </View>
-                <View style={styles.stepRow}>
-                  <Text style={styles.delayLabel}>Delay (sec):</Text>
-                  <TextInput style={[styles.input, styles.delayInput]} placeholder="0" placeholderTextColor="#666" value={String(step.delay)} keyboardType="numeric" onChangeText={(t) => updateStep(step.id, 'delay', parseInt(t) || 0)} />
-                </View>
-                <TouchableOpacity style={styles.removeBtn} onPress={() => removeStep(step.id)}>
-                  <Text style={styles.removeBtnText}>✕ Remove</Text>
-                </TouchableOpacity>
+          {steps.map((step) => (
+            <View key={step.id} style={styles.stepCard}>
+              <View style={styles.stepRow}>
+                <Text style={styles.stepNum}>#{steps.indexOf(step) + 1}</Text>
+                <TextInput style={[styles.input, styles.stepInput]} placeholder="Device ID" placeholderTextColor="#666" value={step.deviceId} onChangeText={(t) => updateStep(step.id, 'deviceId', t)} />
               </View>
-            ))}
-
-            <TouchableOpacity style={styles.addStepBtn} onPress={addStep}>
-              <Text style={styles.addStepBtnText}>+ Add Step</Text>
-            </TouchableOpacity>
-
-            <View style={styles.buttonRow}>
-              <TouchableOpacity style={styles.saveBtn} onPress={saveRoutine}>
-                <Text style={styles.saveBtnText}>💾 Save Routine</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={[styles.execBtn, isExecuting && styles.execBtnDisabled]} onPress={executeRoutine} disabled={isExecuting}>
-                <Text style={styles.execBtnText}>{isExecuting ? 'Executing...' : '▶ Execute'}</Text>
+              <View style={styles.stepRow}>
+                <TextInput style={[styles.input, styles.stepInput]} placeholder="Action (toggle, setTemperature, open)" placeholderTextColor="#666" value={step.action} onChangeText={(t) => updateStep(step.id, 'action', t)} />
+                <TextInput style={[styles.input, styles.stepInput]} placeholder="Value" placeholderTextColor="#666" value={String(step.value)} onChangeText={(t) => updateStep(step.id, 'value', t)} />
+              </View>
+              <View style={styles.stepRow}>
+                <Text style={styles.delayLabel}>Delay (sec):</Text>
+                <TextInput style={[styles.input, styles.delayInput]} placeholder="0" placeholderTextColor="#666" value={String(step.delay)} keyboardType="numeric" onChangeText={(t) => updateStep(step.id, 'delay', parseInt(t) || 0)} />
+              </View>
+              <TouchableOpacity style={styles.removeBtn} onPress={() => removeStep(step.id)}>
+                <Text style={styles.removeBtnText}>✕ Remove</Text>
               </TouchableOpacity>
             </View>
+          ))}
 
-            {executionLog.length > 0 && (
-              <View style={styles.logContainer}>
-                <Text style={styles.logTitle}>Execution Log</Text>
-                {executionLog.map((line, i) => (
-                  <Text key={i} style={[styles.logLine, line.includes('✅') ? styles.logSuccess : line.includes('❌') ? styles.logError : styles.logInfo]}>{line}</Text>
-                ))}
-              </View>
-            )}
+          <TouchableOpacity style={styles.addStepBtn} onPress={addStep}>
+            <Text style={styles.addStepBtnText}>+ Add Step</Text>
+          </TouchableOpacity>
+
+          <View style={styles.buttonRow}>
+            <TouchableOpacity style={styles.saveBtn} onPress={saveRoutine}>
+              <Text style={styles.saveBtnText}>💾 Save Routine</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={[styles.execBtn, isExecuting && styles.execBtnDisabled]} onPress={executeRoutine} disabled={isExecuting}>
+              <Text style={styles.execBtnText}>{isExecuting ? 'Executing...' : '▶ Execute'}</Text>
+            </TouchableOpacity>
           </View>
-        }
-        ListEmptyComponent={null}
-      />
+
+          {executionLog.length > 0 && (
+            <View style={styles.logContainer}>
+              <Text style={styles.logTitle}>Execution Log</Text>
+              {executionLog.map((line, i) => (
+                <Text key={i} style={[styles.logLine, line.includes('✅') ? styles.logSuccess : line.includes('❌') ? styles.logError : styles.logInfo]}>{line}</Text>
+              ))}
+            </View>
+          )}
+        </View>
+      </ScrollView>
     </LinearGradient>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
+  scrollView: { flex: 1 },
   title: { color: '#fff', fontSize: 26, fontWeight: 'bold', marginLeft: 20, marginRight: 20, marginTop: 40, marginBottom: 4 },
   subtitle: { color: '#888', fontSize: 13, marginLeft: 20, marginRight: 20, marginBottom: 16 },
   input: { backgroundColor: 'rgba(255,255,255,0.08)', color: '#fff', borderRadius: 10, padding: 12, fontSize: 14, marginBottom: 10, borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)' },

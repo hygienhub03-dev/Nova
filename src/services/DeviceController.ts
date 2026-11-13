@@ -1,6 +1,7 @@
 import * as Brightness from 'expo-brightness';
 import * as Linking from 'expo-linking';
 import { Camera } from 'expo-camera';
+// @ts-ignore - types may not be available for react-native-volume-manager
 import { VolumeManager } from 'react-native-volume-manager';
 import * as Speech from 'expo-speech';
 import { AssistantEngine } from './AssistantEngine';

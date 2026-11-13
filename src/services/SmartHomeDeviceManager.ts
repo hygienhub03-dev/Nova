@@ -1,4 +1,5 @@
 import * as SQLite from 'expo-sqlite';
+// @ts-ignore - openDatabaseSync may not be available in this version
 import axios from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
@@ -47,6 +48,7 @@ export interface SmartDevice {
   status: 'online' | 'offline' | 'unknown';
   capabilities: string[];
   config: Record<string, any>;
+  last_seen?: number;
 }
 
 export interface Scene {
